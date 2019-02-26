@@ -15,8 +15,6 @@ type Track struct {
 	end     *link
 	current *link
 
-	// newIndex is a channel to receive new index
-	newIndex chan int
 	// last sent index
 	nextIndex int
 }
@@ -50,9 +48,6 @@ func NewTrack(sampleRate int, numChannels int) (t *Track) {
 
 // Pump implements track pump with a sequence of not overlapped clips.
 func (t *Track) Pump(sourceID string, bufferSize int) (func() ([][]float64, error), int, int, error) {
-	// bufferSize = bufferSize
-	t.newIndex = make(chan int)
-	t.nextIndex = 0
 	return func() ([][]float64, error) {
 		if t.nextIndex >= t.endIndex() {
 			return nil, io.EOF
@@ -64,10 +59,9 @@ func (t *Track) Pump(sourceID string, bufferSize int) (func() ([][]float64, erro
 }
 
 // Reset flushes all links from track.
-func (t *Track) Reset() {
-	t.current = nil
-	t.start = nil
-	t.end = nil
+func (t *Track) Reset(sourceID string) error {
+	t.nextIndex = 0
+	return nil
 }
 
 func (t *Track) bufferAt(index, bufferSize int) (result signal.Float64) {

@@ -67,73 +67,73 @@ func TestTrack(t *testing.T) {
 	asset2 := audio.NewAsset([][]float64{{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}})
 	asset3 := &audio.Asset{}
 	tests := []struct {
-		clips   []audio.Clip
-		clipsAt []int
-		result  []float64
-		msg     string
+		clips    []audio.Clip
+		clipsAt  []int
+		expected [][]float64
+		msg      string
 	}{
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 1),
 				asset2.Clip(5, 3),
 			},
-			clipsAt: []int{3, 4},
-			result:  []float64{0, 0, 0, 1, 2, 2, 2, 0},
-			msg:     "Sequence",
+			clipsAt:  []int{3, 4},
+			expected: [][]float64{{0, 0, 0, 1, 2, 2, 2, 0}},
+			msg:      "Sequence",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 1),
 				asset2.Clip(5, 3),
 			},
-			clipsAt: []int{3, 4},
-			result:  []float64{0, 0, 0, 1, 2, 2, 2, 0},
-			msg:     "Sequence increased bufferSize",
+			clipsAt:  []int{3, 4},
+			expected: [][]float64{{0, 0, 0, 1, 2, 2, 2, 0}},
+			msg:      "Sequence increased bufferSize",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 1),
 				asset2.Clip(5, 3),
 			},
-			clipsAt: []int{2, 3},
-			result:  []float64{0, 0, 1, 2, 2, 2},
-			msg:     "Sequence shifted left",
+			clipsAt:  []int{2, 3},
+			expected: [][]float64{{0, 0, 1, 2, 2, 2}},
+			msg:      "Sequence shifted left",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 1),
 				asset2.Clip(5, 3),
 			},
-			clipsAt: []int{2, 4},
-			result:  []float64{0, 0, 1, 0, 2, 2, 2, 0},
-			msg:     "Sequence with interval",
+			clipsAt:  []int{2, 4},
+			expected: [][]float64{{0, 0, 1, 0, 2, 2, 2, 0}},
+			msg:      "Sequence with interval",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 3),
 				asset2.Clip(5, 2),
 			},
-			clipsAt: []int{3, 2},
-			result:  []float64{0, 0, 2, 2, 1, 1},
-			msg:     "Overlap previous",
+			clipsAt:  []int{3, 2},
+			expected: [][]float64{{0, 0, 2, 2, 1, 1}},
+			msg:      "Overlap previous",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 3),
 				asset2.Clip(5, 2),
 			},
-			clipsAt: []int{2, 4},
-			result:  []float64{0, 0, 1, 1, 2, 2},
-			msg:     "Overlap next",
+			clipsAt:  []int{2, 4},
+			expected: [][]float64{{0, 0, 1, 1, 2, 2}},
+			msg:      "Overlap next",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 5),
 				asset2.Clip(5, 2),
 			},
-			clipsAt: []int{2, 4},
-			result:  []float64{0, 0, 1, 1, 2, 2, 1, 0},
-			msg:     "Overlap single in the middle",
+			clipsAt:  []int{2, 4},
+			expected: [][]float64{{0, 0, 1, 1, 2, 2, 1, 0}},
+			msg:      "Overlap single in the middle",
 		},
 		{
 			clips: []audio.Clip{
@@ -141,9 +141,9 @@ func TestTrack(t *testing.T) {
 				asset1.Clip(3, 2),
 				asset2.Clip(5, 2),
 			},
-			clipsAt: []int{2, 5, 4},
-			result:  []float64{0, 0, 1, 1, 2, 2, 1, 0},
-			msg:     "Overlap two in the middle",
+			clipsAt:  []int{2, 5, 4},
+			expected: [][]float64{{0, 0, 1, 1, 2, 2, 1, 0}},
+			msg:      "Overlap two in the middle",
 		},
 		{
 			clips: []audio.Clip{
@@ -151,18 +151,18 @@ func TestTrack(t *testing.T) {
 				asset1.Clip(5, 2),
 				asset2.Clip(3, 2),
 			},
-			clipsAt: []int{2, 5, 3},
-			result:  []float64{0, 0, 1, 2, 2, 1, 1, 0},
-			msg:     "Overlap two in the middle shifted",
+			clipsAt:  []int{2, 5, 3},
+			expected: [][]float64{{0, 0, 1, 2, 2, 1, 1, 0}},
+			msg:      "Overlap two in the middle shifted",
 		},
 		{
 			clips: []audio.Clip{
 				asset1.Clip(3, 2),
 				asset2.Clip(3, 5),
 			},
-			clipsAt: []int{2, 2},
-			result:  []float64{0, 0, 2, 2, 2, 2, 2, 0},
-			msg:     "Overlap single completely",
+			clipsAt:  []int{2, 2},
+			expected: [][]float64{{0, 0, 2, 2, 2, 2, 2, 0}},
+			msg:      "Overlap single completely",
 		},
 		{
 			clips: []audio.Clip{
@@ -170,13 +170,13 @@ func TestTrack(t *testing.T) {
 				asset1.Clip(5, 2),
 				asset2.Clip(1, 8),
 			},
-			clipsAt: []int{2, 5, 1},
-			result:  []float64{0, 2, 2, 2, 2, 2, 2, 2, 2, 0},
-			msg:     "Overlap two completely",
+			clipsAt:  []int{2, 5, 1},
+			expected: [][]float64{{0, 2, 2, 2, 2, 2, 2, 2, 2, 0}},
+			msg:      "Overlap two completely",
 		},
 		{
-			result: []float64{},
-			msg:    "Empty",
+			expected: [][]float64{},
+			msg:      "Empty",
 		},
 		{
 			clips: []audio.Clip{
@@ -184,31 +184,40 @@ func TestTrack(t *testing.T) {
 				asset3.Clip(5, 2),
 				asset3.Clip(1, 8),
 			},
-			clipsAt: []int{2, 5, 1},
-			result:  []float64{},
-			msg:     "Empty asset clips",
+			clipsAt:  []int{2, 5, 1},
+			expected: [][]float64{},
+			msg:      "Empty asset clips",
 		},
 	}
 	bufferSize := 2
 	sampleRate := 44100
 	for _, test := range tests {
 		track := audio.NewTrack(sampleRate, asset1.NumChannels())
+		err := track.Reset("")
+		assert.Nil(t, err)
 
 		for i, clip := range test.clips {
 			track.AddClip(test.clipsAt[i], clip)
 		}
 
-		fn, pumpSampleRate, pumpNumChannels, err := track.Pump("", bufferSize)
+		fn, pumpSampleRate, _, err := track.Pump("", bufferSize)
 		assert.Equal(t, sampleRate, pumpSampleRate)
-		assert.Equal(t, asset1.NumChannels(), pumpNumChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 
 		var result, buf signal.Float64
 		for err == nil {
 			buf, err = fn()
-			result.Append(buf)
+			result = result.Append(buf)
 		}
 		assert.Equal(t, io.EOF, err)
+
+		assert.Equal(t, len(test.expected), result.NumChannels(), test.msg)
+		for i := 0; i < len(result); i++ {
+			assert.Equal(t, len(test.expected[i]), len(result[i]), test.msg)
+			for j := 0; j < len(result[i]); j++ {
+				assert.Equal(t, test.expected[i][j], result[i][j], test.msg)
+			}
+		}
 	}
 }
