@@ -73,14 +73,14 @@ func (t *Track) bufferAt(index, bufferSize int) (result signal.Float64) {
 	for bufferSize > result.Size() {
 		// if current link starts after frame then append empty buffer
 		if t.current == nil || t.current.At >= bufferEnd {
-			result = result.Append(signal.EmptyFloat64(t.numChannels, bufferSize-result.Size()))
+			result = result.Append(signal.Float64Buffer(t.numChannels, bufferSize-result.Size(), 0))
 		} else {
 			// if link starts in current frame
 			if t.current.At >= index {
 				// calculate offset buffer size
 				// offset buffer is needed to align a link start within a buffer
 				offsetBufSize := t.current.At - index
-				result = result.Append(signal.EmptyFloat64(t.numChannels, offsetBufSize))
+				result = result.Append(signal.Float64Buffer(t.numChannels, offsetBufSize, 0))
 				if bufferEnd >= t.current.End() {
 					buf = t.current.data.Slice(t.current.Start, t.current.Len)
 				} else {

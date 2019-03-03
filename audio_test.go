@@ -53,7 +53,7 @@ func TestAsset(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 		for i := 0; i < test.messages; i++ {
-			buf := signal.Mock(test.numChannels, bufferSize, test.value)
+			buf := signal.Float64Buffer(test.numChannels, bufferSize, test.value)
 			err := fn(buf)
 			assert.Nil(t, err)
 		}
