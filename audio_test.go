@@ -49,7 +49,7 @@ func TestAsset(t *testing.T) {
 	bufferSize := 10
 
 	for _, test := range tests {
-		fn, err := test.asset.Sink("", 0, test.numChannels, bufferSize)
+		fn, err := test.asset.Sink("", 0, test.numChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 		for i := 0; i < test.messages; i++ {
@@ -200,14 +200,14 @@ func TestTrack(t *testing.T) {
 			track.AddClip(test.clipsAt[i], clip)
 		}
 
-		fn, pumpSampleRate, _, err := track.Pump("", bufferSize)
+		fn, pumpSampleRate, _, err := track.Pump("")
 		assert.Equal(t, sampleRate, pumpSampleRate)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 
 		var result, buf signal.Float64
 		for err == nil {
-			buf, err = fn()
+			buf, err = fn(bufferSize)
 			result = result.Append(buf)
 		}
 		assert.Equal(t, io.EOF, err)

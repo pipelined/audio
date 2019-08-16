@@ -16,7 +16,7 @@ func NewAsset(floats signal.Float64) *Asset {
 }
 
 // Sink appends buffers to asset.
-func (a *Asset) Sink(sourceID string, sampleRate, numChannels, bufferSize int) (func([][]float64) error, error) {
+func (a *Asset) Sink(sourceID string, sampleRate, numChannels int) (func([][]float64) error, error) {
 	return func(b [][]float64) error {
 		a.data = a.data.Append(b)
 		return nil
