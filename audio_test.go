@@ -13,6 +13,7 @@ func TestAsset(t *testing.T) {
 	tests := []struct {
 		asset       *audio.Asset
 		numChannels int
+		sampleRate  signal.SampleRate
 		value       float64
 		messages    int
 		samples     int
@@ -38,18 +39,11 @@ func TestAsset(t *testing.T) {
 			messages:    0,
 			samples:     0,
 		},
-		{
-			asset:       nil,
-			numChannels: 0,
-			value:       0.7,
-			messages:    0,
-			samples:     0,
-		},
 	}
 	bufferSize := 10
 
 	for _, test := range tests {
-		fn, err := test.asset.Sink("", 0, test.numChannels)
+		fn, err := test.asset.Sink("", int(test.sampleRate), test.numChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 		for i := 0; i < test.messages; i++ {
@@ -58,6 +52,7 @@ func TestAsset(t *testing.T) {
 			assert.Nil(t, err)
 		}
 		assert.Equal(t, test.numChannels, test.asset.NumChannels())
+		assert.Equal(t, test.sampleRate, test.asset.SampleRate())
 		assert.Equal(t, test.samples, test.asset.Data().Size())
 	}
 }

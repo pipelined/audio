@@ -7,7 +7,8 @@ import (
 // Asset is a sink which uses a regular buffer as underlying storage.
 // It can be used as processing input and always should be copied.
 type Asset struct {
-	data signal.Float64
+	sampleRate signal.SampleRate
+	data       signal.Float64
 }
 
 // NewAsset creates new asset from signal.Float64 buffer.
@@ -17,6 +18,7 @@ func NewAsset(floats signal.Float64) *Asset {
 
 // Sink appends buffers to asset.
 func (a *Asset) Sink(sourceID string, sampleRate, numChannels int) (func([][]float64) error, error) {
+	a.sampleRate = signal.SampleRate(sampleRate)
 	return func(b [][]float64) error {
 		a.data = a.data.Append(b)
 		return nil
@@ -37,6 +39,14 @@ func (a *Asset) NumChannels() int {
 		return 0
 	}
 	return a.data.NumChannels()
+}
+
+// SampleRate returns a sample rate of the asset.
+func (a *Asset) SampleRate() signal.SampleRate {
+	if a == nil {
+		return 0
+	}
+	return a.sampleRate
 }
 
 // Clip represents a segment of an asset.
