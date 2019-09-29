@@ -5,14 +5,14 @@ import (
 )
 
 // Asset is a sink which uses a regular buffer as underlying storage.
-// It can be used as processing input and always should be copied.
+// It can be used to make Clips and use them for processing input.
 type Asset struct {
 	sampleRate signal.SampleRate
 	data       signal.Float64
 }
 
-// NewAsset creates new asset from signal.Float64 buffer.
-func NewAsset(floats signal.Float64) *Asset {
+// SignalAsset creates new asset from signal.Float64 buffer.
+func SignalAsset(floats signal.Float64) *Asset {
 	return &Asset{data: floats}
 }
 
@@ -49,20 +49,18 @@ func (a *Asset) SampleRate() signal.SampleRate {
 	return a.sampleRate
 }
 
-// Clip represents a segment of an asset.
-//
-// Clip refers to an asset, but it's not a copy.
+// Clip represents a segment of an asset. It keeps reference to the
+// asset, but doesn't copy its data.
 type Clip struct {
-	*Asset
-	Start int
-	Len   int
+	asset *Asset
+	start int
+	len   int
 }
 
-// Clip creates a new clip from buffer with defined start and length.
-//
-// if start >= buffer size, nil is returned
-// if start + len >= buffer size, len is decreased till the end of slice
-// if start < 0, nil is returned
+// Clip creates a new clip from the asset with defined start and length.
+// If start position less than zero or more than asset's size, Clip with
+// zero length is returned. If Clip size goes beyond the asset, it's
+// truncated up to length of the asset.
 func (a *Asset) Clip(start int, len int) Clip {
 	size := a.data.Size()
 	if a.data == nil || start >= size || start < 0 {
@@ -73,8 +71,8 @@ func (a *Asset) Clip(start int, len int) Clip {
 		len = size - start
 	}
 	return Clip{
-		Asset: a,
-		Start: start,
-		Len:   len,
+		asset: a,
+		start: start,
+		len:   len,
 	}
 }

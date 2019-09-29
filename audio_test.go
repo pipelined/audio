@@ -58,8 +58,8 @@ func TestAsset(t *testing.T) {
 }
 
 func TestTrack(t *testing.T) {
-	asset1 := audio.NewAsset([][]float64{{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}})
-	asset2 := audio.NewAsset([][]float64{{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}})
+	asset1 := audio.SignalAsset([][]float64{{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}})
+	asset2 := audio.SignalAsset([][]float64{{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}})
 	asset3 := &audio.Asset{}
 	tests := []struct {
 		clips    []audio.Clip
