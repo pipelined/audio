@@ -1,7 +1,6 @@
 package audio_test
 
 import (
-	"io"
 	"testing"
 
 	"github.com/pipelined/audio"
@@ -59,6 +58,7 @@ func TestAsset(t *testing.T) {
 
 func TestTrack(t *testing.T) {
 	sampleRate := signal.SampleRate(44100)
+	bufferSize := 2
 	asset1 := audio.SignalAsset(sampleRate, [][]float64{{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}})
 	asset2 := audio.SignalAsset(sampleRate, [][]float64{{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}})
 	asset3 := &audio.Asset{}
@@ -185,7 +185,7 @@ func TestTrack(t *testing.T) {
 			msg:      "Empty asset clips",
 		},
 	}
-	bufferSize := 2
+
 	for _, test := range tests {
 		track := audio.NewTrack(sampleRate, asset1.NumChannels())
 		err := track.Reset("")
@@ -195,8 +195,9 @@ func TestTrack(t *testing.T) {
 			track.AddClip(test.clipsAt[i], clip)
 		}
 
-		fn, pumpSampleRate, _, err := track.Pump("")
+		fn, pumpSampleRate, pumpNumChannels, err := track.Pump("")
 		assert.Equal(t, int(sampleRate), pumpSampleRate)
+		assert.Equal(t, asset1.NumChannels(), pumpNumChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 
@@ -205,7 +206,7 @@ func TestTrack(t *testing.T) {
 			buf, err = fn(bufferSize)
 			result = result.Append(buf)
 		}
-		assert.Equal(t, io.EOF, err)
+		assert.NotNil(t, err)
 
 		assert.Equal(t, len(test.expected), result.NumChannels(), test.msg)
 		for i := 0; i < len(result); i++ {
@@ -215,4 +216,60 @@ func TestTrack(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestClip(t *testing.T) {
+	sampleRate := signal.SampleRate(44100)
+	bufferSize := 2
+	a := audio.SignalAsset(sampleRate, [][]float64{{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}})
+	tests := []struct {
+		clip     audio.Clip
+		expected signal.Float64
+		msg      string
+	}{
+		{
+			clip:     a.Clip(0, a.Data().Size()),
+			expected: [][]float64{{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
+			msg:      "Full asset",
+		},
+		{
+			clip:     a.Clip(0, 3),
+			expected: [][]float64{{0, 1, 2}},
+			msg:      "First three",
+		},
+		{
+			clip:     a.Clip(1, 2),
+			expected: [][]float64{{1, 2}},
+			msg:      "Two from within",
+		},
+		{
+			clip:     a.Clip(5, 10),
+			expected: [][]float64{{5, 6, 7, 8, 9}},
+			msg:      "Last five",
+		},
+	}
+
+	for _, test := range tests {
+		fn, pumpSampleRate, pumpNumChannels, err := test.clip.Pump("")
+		assert.Equal(t, int(sampleRate), pumpSampleRate)
+		assert.Equal(t, a.NumChannels(), pumpNumChannels)
+		assert.Nil(t, err)
+		assert.NotNil(t, fn)
+
+		var result, buf signal.Float64
+		for err == nil {
+			buf, err = fn(bufferSize)
+			result = result.Append(buf)
+		}
+
+		assert.NotNil(t, err)
+		assert.Equal(t, len(test.expected), result.NumChannels(), test.msg)
+		for i := 0; i < len(result); i++ {
+			assert.Equal(t, len(test.expected[i]), len(result[i]), test.msg)
+			for j := 0; j < len(result[i]); j++ {
+				assert.Equal(t, test.expected[i][j], result[i][j], test.msg)
+			}
+		}
+	}
+
 }

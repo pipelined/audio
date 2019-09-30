@@ -54,6 +54,9 @@ func (t *Track) Pump(sourceID string) (func(bufferSize int) ([][]float64, error)
 		}
 		b := t.bufferAt(t.nextIndex, bufferSize)
 		t.nextIndex += bufferSize
+		if b.Size() < bufferSize {
+			return b, io.ErrUnexpectedEOF
+		}
 		return b, nil
 	}, int(t.sampleRate), t.numChannels, nil
 }

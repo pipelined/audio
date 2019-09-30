@@ -1,6 +1,9 @@
 package audio
 
 import (
+	"fmt"
+	"io"
+
 	"github.com/pipelined/signal"
 )
 
@@ -78,4 +81,31 @@ func (a *Asset) Clip(start int, len int) Clip {
 		start: start,
 		len:   len,
 	}
+}
+
+// Pump implements clip pump with a data from the asset.
+func (c Clip) Pump(sourceID string) (func(bufferSize int) ([][]float64, error), int, int, error) {
+	if c.asset == nil || c.asset.Data() == nil {
+		return nil, 0, 0, fmt.Errorf("clip refers to empty asset")
+	}
+	// position where read starts.
+	pos := c.start
+	// end of clip.
+	end := c.start + c.len
+	// size to read.
+	var buf signal.Float64
+	return func(bufferSize int) ([][]float64, error) {
+		if pos > end {
+			return nil, io.EOF
+		}
+		// not enough samples left to make full read.
+		if end-pos < bufferSize {
+			buf = c.asset.data.Slice(pos, end-pos)
+			return buf, io.ErrUnexpectedEOF
+		}
+		buf = c.asset.data.Slice(pos, bufferSize)
+		pos += buf.Size()
+		return buf, nil
+
+	}, int(c.asset.SampleRate()), c.asset.NumChannels(), nil
 }
