@@ -12,8 +12,11 @@ type Asset struct {
 }
 
 // SignalAsset creates new asset from signal.Float64 buffer.
-func SignalAsset(floats signal.Float64) *Asset {
-	return &Asset{data: floats}
+func SignalAsset(sampleRate signal.SampleRate, data signal.Float64) *Asset {
+	return &Asset{
+		sampleRate: sampleRate,
+		data:       data,
+	}
 }
 
 // Sink appends buffers to asset.

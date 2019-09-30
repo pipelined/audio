@@ -58,8 +58,9 @@ func TestAsset(t *testing.T) {
 }
 
 func TestTrack(t *testing.T) {
-	asset1 := audio.SignalAsset([][]float64{{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}})
-	asset2 := audio.SignalAsset([][]float64{{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}})
+	sampleRate := signal.SampleRate(44100)
+	asset1 := audio.SignalAsset(sampleRate, [][]float64{{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}})
+	asset2 := audio.SignalAsset(sampleRate, [][]float64{{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}})
 	asset3 := &audio.Asset{}
 	tests := []struct {
 		clips    []audio.Clip
@@ -185,7 +186,6 @@ func TestTrack(t *testing.T) {
 		},
 	}
 	bufferSize := 2
-	sampleRate := 44100
 	for _, test := range tests {
 		track := audio.NewTrack(sampleRate, asset1.NumChannels())
 		err := track.Reset("")
@@ -196,7 +196,7 @@ func TestTrack(t *testing.T) {
 		}
 
 		fn, pumpSampleRate, _, err := track.Pump("")
-		assert.Equal(t, sampleRate, pumpSampleRate)
+		assert.Equal(t, int(sampleRate), pumpSampleRate)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 

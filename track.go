@@ -9,7 +9,7 @@ import (
 // Track is a sequence of pipes which are executed one after another.
 type Track struct {
 	numChannels int
-	sampleRate  int
+	sampleRate  signal.SampleRate
 
 	start   *link
 	end     *link
@@ -37,7 +37,7 @@ func (l *link) End() int {
 }
 
 // NewTrack creates a new track in a session.
-func NewTrack(sampleRate int, numChannels int) (t *Track) {
+func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 	t = &Track{
 		nextIndex:   0,
 		sampleRate:  sampleRate,
@@ -55,7 +55,7 @@ func (t *Track) Pump(sourceID string) (func(bufferSize int) ([][]float64, error)
 		b := t.bufferAt(t.nextIndex, bufferSize)
 		t.nextIndex += bufferSize
 		return b, nil
-	}, t.sampleRate, t.numChannels, nil
+	}, int(t.sampleRate), t.numChannels, nil
 }
 
 // Reset flushes all links from track.
