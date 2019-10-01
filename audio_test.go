@@ -247,6 +247,11 @@ func TestClip(t *testing.T) {
 			expected: [][]float64{{5, 6, 7, 8, 9}},
 			msg:      "Last five",
 		},
+		{
+			clip:     a.Clip(-1, 10),
+			expected: [][]float64{{}},
+			msg:      "Negative start",
+		},
 	}
 
 	for _, test := range tests {

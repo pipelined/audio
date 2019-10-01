@@ -70,7 +70,9 @@ type Clip struct {
 func (a *Asset) Clip(start int, len int) Clip {
 	size := a.data.Size()
 	if a.data == nil || start >= size || start < 0 {
-		return Clip{}
+		return Clip{
+			asset: a,
+		}
 	}
 	end := start + len
 	if end >= size {
