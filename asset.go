@@ -1,22 +1,30 @@
 package audio
 
 import (
+	"fmt"
+	"io"
+
 	"github.com/pipelined/signal"
 )
 
 // Asset is a sink which uses a regular buffer as underlying storage.
-// It can be used as processing input and always should be copied.
+// It can be used to make Clips and use them for processing input.
 type Asset struct {
-	data signal.Float64
+	sampleRate signal.SampleRate
+	data       signal.Float64
 }
 
-// NewAsset creates new asset from signal.Float64 buffer.
-func NewAsset(floats signal.Float64) *Asset {
-	return &Asset{data: floats}
+// SignalAsset creates new asset from signal.Float64 buffer.
+func SignalAsset(sampleRate signal.SampleRate, data signal.Float64) *Asset {
+	return &Asset{
+		sampleRate: sampleRate,
+		data:       data,
+	}
 }
 
 // Sink appends buffers to asset.
 func (a *Asset) Sink(sourceID string, sampleRate, numChannels int) (func([][]float64) error, error) {
+	a.sampleRate = signal.SampleRate(sampleRate)
 	return func(b [][]float64) error {
 		a.data = a.data.Append(b)
 		return nil
@@ -39,32 +47,67 @@ func (a *Asset) NumChannels() int {
 	return a.data.NumChannels()
 }
 
-// Clip represents a segment of an asset.
-//
-// Clip refers to an asset, but it's not a copy.
-type Clip struct {
-	*Asset
-	Start int
-	Len   int
+// SampleRate returns a sample rate of the asset.
+func (a *Asset) SampleRate() signal.SampleRate {
+	if a == nil {
+		return 0
+	}
+	return a.sampleRate
 }
 
-// Clip creates a new clip from buffer with defined start and length.
-//
-// if start >= buffer size, nil is returned
-// if start + len >= buffer size, len is decreased till the end of slice
-// if start < 0, nil is returned
+// Clip represents a segment of an asset. It keeps reference to the
+// asset, but doesn't copy its data.
+type Clip struct {
+	asset *Asset
+	start int
+	len   int
+}
+
+// Clip creates a new clip from the asset with defined start and length.
+// If start position less than zero or more than asset's size, Clip with
+// zero length is returned. If Clip size goes beyond the asset, it's
+// truncated up to length of the asset.
 func (a *Asset) Clip(start int, len int) Clip {
 	size := a.data.Size()
 	if a.data == nil || start >= size || start < 0 {
-		return Clip{}
+		return Clip{
+			asset: a,
+		}
 	}
 	end := start + len
 	if end >= size {
 		len = size - start
 	}
 	return Clip{
-		Asset: a,
-		Start: start,
-		Len:   len,
+		asset: a,
+		start: start,
+		len:   len,
 	}
+}
+
+// Pump implements clip pump with a data from the asset.
+func (c Clip) Pump(sourceID string) (func(bufferSize int) ([][]float64, error), int, int, error) {
+	if c.asset == nil || c.asset.Data() == nil {
+		return nil, 0, 0, fmt.Errorf("clip refers to empty asset")
+	}
+	// position where read starts.
+	pos := c.start
+	// end of clip.
+	end := c.start + c.len
+	// size to read.
+	var buf signal.Float64
+	return func(bufferSize int) ([][]float64, error) {
+		if pos >= end {
+			return nil, io.EOF
+		}
+		// not enough samples left to make full read.
+		if end-pos < bufferSize {
+			buf = c.asset.data.Slice(pos, end-pos)
+			return buf, io.ErrUnexpectedEOF
+		}
+		buf = c.asset.data.Slice(pos, bufferSize)
+		pos += buf.Size()
+		return buf, nil
+
+	}, int(c.asset.SampleRate()), c.asset.NumChannels(), nil
 }

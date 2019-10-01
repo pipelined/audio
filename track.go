@@ -9,7 +9,7 @@ import (
 // Track is a sequence of pipes which are executed one after another.
 type Track struct {
 	numChannels int
-	sampleRate  int
+	sampleRate  signal.SampleRate
 
 	start   *link
 	end     *link
@@ -33,11 +33,11 @@ func (l *link) End() int {
 	if l == nil {
 		return -1
 	}
-	return l.At + l.Len
+	return l.At + l.len
 }
 
 // NewTrack creates a new track in a session.
-func NewTrack(sampleRate int, numChannels int) (t *Track) {
+func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 	t = &Track{
 		nextIndex:   0,
 		sampleRate:  sampleRate,
@@ -54,8 +54,11 @@ func (t *Track) Pump(sourceID string) (func(bufferSize int) ([][]float64, error)
 		}
 		b := t.bufferAt(t.nextIndex, bufferSize)
 		t.nextIndex += bufferSize
+		if b.Size() < bufferSize {
+			return b, io.ErrUnexpectedEOF
+		}
 		return b, nil
-	}, t.sampleRate, t.numChannels, nil
+	}, int(t.sampleRate), t.numChannels, nil
 }
 
 // Reset flushes all links from track.
@@ -82,16 +85,16 @@ func (t *Track) bufferAt(index, bufferSize int) (result signal.Float64) {
 				offsetBufSize := t.current.At - index
 				result = result.Append(signal.Float64Buffer(t.numChannels, offsetBufSize, 0))
 				if bufferEnd >= t.current.End() {
-					buf = t.current.data.Slice(t.current.Start, t.current.Len)
+					buf = t.current.asset.data.Slice(t.current.start, t.current.len)
 				} else {
-					buf = t.current.data.Slice(t.current.Start, bufferSize-result.Size())
+					buf = t.current.asset.data.Slice(t.current.start, bufferSize-result.Size())
 				}
 			} else {
-				start := index - t.current.At + t.current.Start
+				start := index - t.current.At + t.current.start
 				if bufferEnd >= t.current.End() {
-					buf = t.current.data.Slice(start, t.current.End()-index)
+					buf = t.current.asset.data.Slice(start, t.current.End()-index)
 				} else {
-					buf = t.current.data.Slice(start, bufferSize)
+					buf = t.current.asset.data.Slice(start, bufferSize)
 				}
 			}
 			index += buf.Size()
@@ -121,12 +124,12 @@ func (t *Track) endIndex() int {
 	if t.end == nil {
 		return -1
 	}
-	return t.end.At + t.end.Len
+	return t.end.At + t.end.len
 }
 
 // AddClip assigns a frame to a track.
 func (t *Track) AddClip(at int, c Clip) {
-	if c.Asset == nil {
+	if c.asset == nil || c.len == 0 {
 		return
 	}
 	t.current = nil
@@ -172,12 +175,12 @@ func (t *Track) alignNextLink(l *link) {
 	if next == nil {
 		return
 	}
-	overlap := l.At - next.At + l.Len
+	overlap := l.At - next.At + l.len
 	if overlap > 0 {
-		if next.Len > overlap {
+		if next.len > overlap {
 			// shorten next
-			next.Start = next.Start + overlap
-			next.Len = next.Len - overlap
+			next.start = next.start + overlap
+			next.len = next.len - overlap
 			next.At = next.At + overlap
 		} else {
 			// remove next
@@ -197,14 +200,14 @@ func (t *Track) alignPrevLink(l *link) {
 	if prev == nil {
 		return
 	}
-	overlap := prev.At - l.At + prev.Len
+	overlap := prev.At - l.At + prev.len
 	if overlap > 0 {
-		prev.Len = prev.Len - overlap
-		if overlap > l.Len {
-			at := l.At + l.Len
-			start := overlap + l.Len + l.At - prev.At
-			len := overlap - l.Len
-			t.AddClip(at, prev.Asset.Clip(start, len))
+		prev.len = prev.len - overlap
+		if overlap > l.len {
+			at := l.At + l.len
+			start := overlap + l.len + l.At - prev.At
+			len := overlap - l.len
+			t.AddClip(at, prev.asset.Clip(start, len))
 		}
 	}
 }
