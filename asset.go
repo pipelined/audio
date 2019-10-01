@@ -97,7 +97,7 @@ func (c Clip) Pump(sourceID string) (func(bufferSize int) ([][]float64, error), 
 	// size to read.
 	var buf signal.Float64
 	return func(bufferSize int) ([][]float64, error) {
-		if pos > end {
+		if pos >= end {
 			return nil, io.EOF
 		}
 		// not enough samples left to make full read.
