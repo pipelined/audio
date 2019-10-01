@@ -249,7 +249,7 @@ func TestClip(t *testing.T) {
 		},
 		{
 			clip:     a.Clip(-1, 10),
-			expected: [][]float64{{}},
+			expected: [][]float64{},
 			msg:      "Negative start",
 		},
 	}
