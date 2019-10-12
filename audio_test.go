@@ -42,11 +42,11 @@ func TestAsset(t *testing.T) {
 	bufferSize := 10
 
 	for _, test := range tests {
-		fn, err := test.asset.Sink("", int(test.sampleRate), test.numChannels)
+		fn, err := test.asset.Sink("", test.sampleRate, test.numChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 		for i := 0; i < test.messages; i++ {
-			buf := signal.Float64Buffer(test.numChannels, bufferSize, test.value)
+			buf := signal.Float64Buffer(test.numChannels, bufferSize)
 			err := fn(buf)
 			assert.Nil(t, err)
 		}
@@ -256,14 +256,18 @@ func TestClip(t *testing.T) {
 
 	for _, test := range tests {
 		fn, pumpSampleRate, pumpNumChannels, err := test.clip.Pump("")
-		assert.Equal(t, int(sampleRate), pumpSampleRate)
+		assert.Equal(t, sampleRate, pumpSampleRate)
 		assert.Equal(t, a.NumChannels(), pumpNumChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
 
-		var result, buf signal.Float64
-		for err == nil {
-			buf, err = fn(bufferSize)
+		var result signal.Float64
+		buf := signal.Float64Buffer(pumpNumChannels, bufferSize)
+		for {
+			err = fn(buf)
+			if err != nil {
+				break
+			}
 			result = result.Append(buf)
 		}
 
