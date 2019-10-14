@@ -13,10 +13,9 @@ type Track struct {
 
 	start   *link
 	end     *link
-	current *link
+	current *link // next link, that ends after index
 
-	// last sent index
-	nextIndex int
+	index int // last sent index
 }
 
 // stream is a sequence of Clips in track.
@@ -28,7 +27,7 @@ type link struct {
 	Prev *link
 }
 
-// End returns an end index of link.
+// End position of the link in the track.
 func (l *link) End() int {
 	if l == nil {
 		return -1
@@ -36,10 +35,11 @@ func (l *link) End() int {
 	return l.At + l.len
 }
 
-// NewTrack creates a new track in a session.
+// NewTrack creates a new track. Currently track is not threadsafe.
+// It means that clips couldn't be added during pipe execution.
 func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 	t = &Track{
-		nextIndex:   0,
+		index:       0,
 		sampleRate:  sampleRate,
 		numChannels: numChannels,
 	}
@@ -47,74 +47,70 @@ func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 }
 
 // Pump implements track pump with a sequence of not overlapped clips.
-func (t *Track) Pump(sourceID string) (func(bufferSize int) ([][]float64, error), int, int, error) {
-	return func(bufferSize int) ([][]float64, error) {
-		if t.nextIndex >= t.endIndex() {
-			return nil, io.EOF
+func (t *Track) Pump(sourceID string) (func(signal.Float64) error, int, int, error) {
+	return func(b signal.Float64) error {
+		if t.index >= t.endIndex() {
+			return io.EOF
 		}
-		b := t.bufferAt(t.nextIndex, bufferSize)
-		t.nextIndex += bufferSize
-		if b.Size() < bufferSize {
-			return b, io.ErrUnexpectedEOF
-		}
-		return b, nil
+		t.nextBuffer(b)
+		t.index += b.Size()
+		return nil
 	}, int(t.sampleRate), t.numChannels, nil
 }
 
-// Reset flushes all links from track.
+// Reset sets track position to 0.
 func (t *Track) Reset(sourceID string) error {
-	t.nextIndex = 0
+	t.index = 0
 	return nil
 }
 
-func (t *Track) bufferAt(index, bufferSize int) (result signal.Float64) {
-	if t.current == nil {
-		t.current = t.linkAfter(index)
-	}
-	var buf signal.Float64
-	bufferEnd := index + bufferSize
-	for bufferSize > result.Size() {
-		// if current link starts after frame then append empty buffer
+func (t *Track) nextBuffer(b signal.Float64) {
+	bufferEnd := t.index + b.Size()
+	// number of read samples.
+	var read int
+	// read data until buffer is full or no more links till buffer end.
+	for read < b.Size() {
+		// fmt.Printf("read at: %d buffer end: %d current: %v\n", t.index, bufferEnd, t.current)
 		if t.current == nil || t.current.At >= bufferEnd {
-			result = result.Append(signal.Float64Buffer(t.numChannels, bufferSize-result.Size()))
+			return
+		}
+		sliceStart := t.current.start
+		// if link starts within buffer.
+		if offset := t.current.At - (t.index + read); offset < b.Size() && offset > 0 {
+			// don't read data in the offset.
+			read += offset
 		} else {
-			// if link starts in current frame
-			if t.current.At >= index {
-				// calculate offset buffer size
-				// offset buffer is needed to align a link start within a buffer
-				offsetBufSize := t.current.At - index
-				result = result.Append(signal.Float64Buffer(t.numChannels, offsetBufSize))
-				if bufferEnd >= t.current.End() {
-					buf = t.current.asset.data.Slice(t.current.start, t.current.len)
-				} else {
-					buf = t.current.asset.data.Slice(t.current.start, bufferSize-result.Size())
-				}
-			} else {
-				start := index - t.current.At + t.current.start
-				if bufferEnd >= t.current.End() {
-					buf = t.current.asset.data.Slice(start, t.current.End()-index)
-				} else {
-					buf = t.current.asset.data.Slice(start, bufferSize)
-				}
-			}
-			index += buf.Size()
-			result = result.Append(buf)
-			if index >= t.current.End() {
-				t.current = t.current.Next
+			sliceStart -= offset
+		}
+
+		var sliceEnd int
+		// if current link ends withing buffer.
+		if bufferEnd > t.current.End() {
+			sliceEnd = t.current.start + t.current.len
+		} else {
+			sliceEnd = sliceStart + b.Size() - read
+		}
+
+		for i := range b {
+			data := t.current.asset.data[i][sliceStart:sliceEnd]
+			for j := range data {
+				b[i][read+j] = data[j]
 			}
 		}
+		read += (sliceEnd - sliceStart)
+
+		if t.index+read >= t.current.End() {
+			t.current = t.linkAfter(t.index + read)
+		}
 	}
-	return result
 }
 
-// linkAfter searches for a first link after passed index.
+// linkAfter searches for a first link, that ends after passed index.
 func (t *Track) linkAfter(index int) *link {
-	slice := t.start
-	for slice != nil {
-		if slice.At >= index {
-			return slice
+	for l := t.start; l != nil; l = l.Next {
+		if l.End() > index {
+			return l
 		}
-		slice = slice.Next
 	}
 	return nil
 }
@@ -127,32 +123,52 @@ func (t *Track) endIndex() int {
 	return t.end.At + t.end.len
 }
 
-// AddClip assigns a frame to a track.
+// AddClip to the track. If clip has no asset or zero length, it
+// won't be added to the track. Overlapped clips are realigned.
 func (t *Track) AddClip(at int, c Clip) {
+	// ignore empty clips.
 	if c.asset == nil || c.len == 0 {
 		return
 	}
-	t.current = nil
+
+	// reset current clip after all realignments
+	defer func() {
+		t.current = t.linkAfter(t.index)
+	}()
+
+	// create a new link.
 	l := &link{
 		At:   at,
 		Clip: c,
 	}
 
+	// if it's the first link.
 	if t.start == nil {
 		t.start = l
 		t.end = l
 		return
 	}
 
+	// connect new link with next link.
 	var next, prev *link
 	if next = t.linkAfter(at); next != nil {
-		prev = next.Prev
-		next.Prev = l
-	} else {
+		if next.At > at {
+			// if next starts after
+			prev = next.Prev
+			next.Prev = l
+		} else {
+			// if next starts before
+			prev = next
+			next = next.Next
+		}
+	}
+
+	if next == nil {
 		prev = t.end
 		t.end = l
 	}
 
+	// connect new link with previous link.
 	if prev != nil {
 		prev.Next = l
 	} else {
@@ -161,6 +177,7 @@ func (t *Track) AddClip(at int, c Clip) {
 	l.Next = next
 	l.Prev = prev
 
+	// resolve overlaps in the track.
 	t.resolveOverlaps(l)
 }
 
