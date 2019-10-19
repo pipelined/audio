@@ -111,6 +111,5 @@ func (c Clip) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRa
 		}
 		pos += b.Size()
 		return nil
-
 	}, c.asset.SampleRate(), c.asset.NumChannels(), nil
 }

@@ -70,7 +70,6 @@ func (t *Track) nextBuffer(b signal.Float64) {
 	var read int
 	// read data until buffer is full or no more links till buffer end.
 	for read < b.Size() {
-		// fmt.Printf("read at: %d buffer end: %d current: %v\n", t.index, bufferEnd, t.current)
 		if t.current == nil || t.current.At >= bufferEnd {
 			return
 		}
