@@ -23,9 +23,9 @@ func SignalAsset(sampleRate signal.SampleRate, data signal.Float64) *Asset {
 }
 
 // Sink appends buffers to asset.
-func (a *Asset) Sink(sourceID string, sampleRate, numChannels int) (func([][]float64) error, error) {
+func (a *Asset) Sink(sourceID string, sampleRate signal.SampleRate, numChannels int) (func(signal.Float64) error, error) {
 	a.sampleRate = signal.SampleRate(sampleRate)
-	return func(b [][]float64) error {
+	return func(b signal.Float64) error {
 		a.data = a.data.Append(b)
 		return nil
 	}, nil
@@ -65,7 +65,7 @@ type Clip struct {
 
 // Clip creates a new clip from the asset with defined start and length.
 // If start position less than zero or more than asset's size, Clip with
-// zero length is returned. If Clip size goes beyond the asset, it's
+// zero length is returned. If Clip len goes beyond the asset, it's
 // truncated up to length of the asset.
 func (a *Asset) Clip(start int, len int) Clip {
 	size := a.data.Size()
@@ -86,7 +86,7 @@ func (a *Asset) Clip(start int, len int) Clip {
 }
 
 // Pump implements clip pump with a data from the asset.
-func (c Clip) Pump(sourceID string) (func(bufferSize int) ([][]float64, error), int, int, error) {
+func (c Clip) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
 	if c.asset == nil || c.asset.Data() == nil {
 		return nil, 0, 0, fmt.Errorf("clip refers to empty asset")
 	}
@@ -94,20 +94,22 @@ func (c Clip) Pump(sourceID string) (func(bufferSize int) ([][]float64, error), 
 	pos := c.start
 	// end of clip.
 	end := c.start + c.len
-	// size to read.
-	var buf signal.Float64
-	return func(bufferSize int) ([][]float64, error) {
+	return func(b signal.Float64) error {
 		if pos >= end {
-			return nil, io.EOF
+			return io.EOF
 		}
-		// not enough samples left to make full read.
-		if end-pos < bufferSize {
-			buf = c.asset.data.Slice(pos, end-pos)
-			return buf, io.ErrUnexpectedEOF
+		// not enough samples left to make full read, trim.
+		if end-pos < b.Size() {
+			for i := range b {
+				b[i] = b[i][:end-pos]
+			}
 		}
-		buf = c.asset.data.Slice(pos, bufferSize)
-		pos += buf.Size()
-		return buf, nil
 
-	}, int(c.asset.SampleRate()), c.asset.NumChannels(), nil
+		// copy values.
+		for i := range b {
+			copy(b[i], c.asset.data[i][pos:])
+		}
+		pos += b.Size()
+		return nil
+	}, c.asset.SampleRate(), c.asset.NumChannels(), nil
 }
