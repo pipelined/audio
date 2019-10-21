@@ -47,7 +47,7 @@ func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 }
 
 // Pump implements track pump with a sequence of not overlapped clips.
-func (t *Track) Pump(sourceID string) (func(signal.Float64) error, int, int, error) {
+func (t *Track) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
 	return func(b signal.Float64) error {
 		if t.index >= t.endIndex() {
 			return io.EOF
@@ -55,7 +55,7 @@ func (t *Track) Pump(sourceID string) (func(signal.Float64) error, int, int, err
 		t.nextBuffer(b)
 		t.index += b.Size()
 		return nil
-	}, int(t.sampleRate), t.numChannels, nil
+	}, t.sampleRate, t.numChannels, nil
 }
 
 // Reset sets track position to 0.
