@@ -148,7 +148,7 @@ func TestTrack(t *testing.T) {
 		}
 
 		fn, pumpSampleRate, pumpNumChannels, err := track.Pump("")
-		assert.Equal(t, int(sampleRate), pumpSampleRate)
+		assert.Equal(t, sampleRate, pumpSampleRate)
 		assert.Equal(t, asset1.NumChannels(), pumpNumChannels)
 		assert.Nil(t, err)
 		assert.NotNil(t, fn)
