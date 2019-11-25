@@ -1,7 +1,11 @@
 package file_test
 
 import (
+	"fmt"
+	"path/filepath"
 	"testing"
+
+	"github.com/pipelined/pipe"
 
 	"github.com/stretchr/testify/assert"
 	"pipelined.dev/audio/file"
@@ -62,4 +66,41 @@ func TestExtensions(t *testing.T) {
 		exts := test.format.Extensions()
 		assert.Equal(t, test.expected, len(exts))
 	}
+}
+
+func TestWalk(t *testing.T) {
+	testPositive := func(path string, recursive bool, expected int, formats ...file.Format) func(*testing.T) {
+		return func(t *testing.T) {
+			pumps := make([]pipe.Pump, 0)
+			fn := func(p pipe.Pump) error {
+				pumps = append(pumps, p)
+				return nil
+			}
+			walkFn := file.WalkPipe(fn, recursive, formats...)
+			err := filepath.Walk(path, walkFn)
+			assert.Nil(t, err)
+			assert.Equal(t, expected, len(pumps))
+		}
+	}
+	testFailedWalk := func() func(*testing.T) {
+		return func(t *testing.T) {
+			err := filepath.Walk("nonexistentfile.wav", file.WalkPipe(nil, false))
+			assert.Error(t, err)
+		}
+	}
+	testFailedPipe := func(path string) func(*testing.T) {
+		return func(t *testing.T) {
+			err := filepath.Walk(path,
+				file.WalkPipe(func(pipe.Pump) error {
+					return fmt.Errorf("pipe error")
+				}, false))
+			assert.Error(t, err)
+		}
+	}
+	t.Run("recursive", testPositive("_testdata", true, 2))
+	t.Run("nonrecursive", testPositive("_testdata", false, 0))
+	t.Run("recursive wavs", testPositive("_testdata", true, 1, file.WAV))
+	t.Run("nonexistent ext", testPositive("_testdata/test.nonexistentext", false, 0))
+	t.Run("nonexistent file", testFailedWalk())
+	t.Run("failed pipe", testFailedPipe("_testdata/test.wav"))
 }
