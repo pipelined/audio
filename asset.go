@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/pipelined/signal"
+	"pipelined.dev/signal"
 )
 
 // Asset is a sink which uses a regular buffer as underlying storage.

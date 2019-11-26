@@ -3,7 +3,7 @@ package audio
 import (
 	"io"
 
-	"github.com/pipelined/signal"
+	"pipelined.dev/signal"
 )
 
 // Track is a sequence of pipes which are executed one after another.
