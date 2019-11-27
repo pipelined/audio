@@ -3,9 +3,10 @@ package audio_test
 import (
 	"testing"
 
-	"github.com/pipelined/audio"
-	"github.com/pipelined/signal"
 	"github.com/stretchr/testify/assert"
+
+	"pipelined.dev/audio"
+	"pipelined.dev/signal"
 )
 
 func TestTrack(t *testing.T) {
