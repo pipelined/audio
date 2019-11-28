@@ -5,4 +5,4 @@
 [![Build Status](https://travis-ci.org/pipelined/audio.svg?branch=master)](https://travis-ci.org/pipelined/audio)
 [![codecov](https://codecov.io/gh/pipelined/audio/branch/master/graph/badge.svg)](https://codecov.io/gh/pipelined/audio)
 
-Audio package offers higher-level abstractions for audio signal manipulations.
+Package audio provides higher-level abstractions for audio signal manipulations.
