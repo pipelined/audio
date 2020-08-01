@@ -20,5 +20,11 @@ gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 h1:qIbj1fsPNlZgppZ+VLlY7N33
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v2 v2.2.2 h1:ZCJp+EgiOT7lHqUV2J862kp8Qj64Jo6az82+3Td9dZw=
 gopkg.in/yaml.v2 v2.2.2/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
+pipelined.dev/pipe v0.8.2 h1:CUxZ0OoZt6DSkTlOQ+SKQ3d/2VxiluYogf009wdGmBE=
+pipelined.dev/pipe v0.8.2/go.mod h1:vGXJKBk/tBWFjPFxkfk4w5lkDgFXheS6YwZvIE4WTxc=
 pipelined.dev/signal v0.5.1 h1:YUByar6Ag2QADGrwJSle8cBNX47QXjKcO5Et8j7X0tk=
 pipelined.dev/signal v0.5.1/go.mod h1:ko39GxEHlEuj853CmzFWTID6qotniC3bw0KiUndPxvI=
+pipelined.dev/signal v0.7.2 h1:rF+K3D0RAhcFk6eHbaXezLWV76o3Hq8b1WROLfMKZRk=
+pipelined.dev/signal v0.7.2/go.mod h1:wi0YlA20+rinS9o+7IMZHH3/YsO3jkahHNLSCCfaEA0=
+pipelined.dev/signal v0.7.3 h1:lMm9mRGILjTDPcC5bcLL/x++j87Az/4ee51u3HNzeMs=
+pipelined.dev/signal v0.7.3/go.mod h1:wi0YlA20+rinS9o+7IMZHH3/YsO3jkahHNLSCCfaEA0=

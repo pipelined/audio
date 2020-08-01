@@ -1,9 +1,9 @@
 package audio
 
 import (
-	"fmt"
 	"io"
 
+	"pipelined.dev/pipe"
 	"pipelined.dev/signal"
 )
 
@@ -11,40 +11,74 @@ import (
 // It can be used to make Clips and use them for processing input.
 type Asset struct {
 	sampleRate signal.SampleRate
-	data       signal.Float64
+	data       signal.Floating
 }
 
-// SignalAsset creates new asset from signal.Float64 buffer.
-func SignalAsset(sampleRate signal.SampleRate, data signal.Float64) *Asset {
+// SignalAsset creates new asset with signal.Floating buffer data.
+func SignalAsset(sampleRate signal.SampleRate, data signal.Floating) *Asset {
 	return &Asset{
 		sampleRate: sampleRate,
 		data:       data,
 	}
 }
 
+// Source implements clip source with a data from the asset.
+func (a *Asset) Source(start, length int) pipe.SourceAllocatorFunc {
+	data := a.data.Slice(start, start+length)
+	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+		// read position
+		pos := 0
+		return pipe.Source{
+				SourceFunc: func(out signal.Floating) (int, error) {
+					if pos == length {
+						return 0, io.EOF
+					}
+					end := pos + out.Length()
+					if end >= length {
+						end = length
+					}
+					read := signal.FloatingAsFloating(data.Slice(pos, end), out)
+					pos = end
+					return read, nil
+				},
+			}, pipe.SignalProperties{
+				Channels:   a.Channels(),
+				SampleRate: a.SampleRate(),
+			}, nil
+	}
+}
+
 // Sink appends buffers to asset.
-func (a *Asset) Sink(sourceID string, sampleRate signal.SampleRate, numChannels int) (func(signal.Float64) error, error) {
-	a.sampleRate = signal.SampleRate(sampleRate)
-	return func(b signal.Float64) error {
-		a.data = a.data.Append(b)
-		return nil
-	}, nil
+func (a *Asset) Sink() pipe.SinkAllocatorFunc {
+	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+		a.sampleRate = props.SampleRate
+		a.data = signal.Allocator{
+			Channels: props.Channels,
+			Capacity: bufferSize,
+		}.Float64()
+		return pipe.Sink{
+			SinkFunc: func(in signal.Floating) error {
+				a.data = a.data.Append(in)
+				return nil
+			},
+		}, nil
+	}
 }
 
 // Data returns asset's data.
-func (a *Asset) Data() signal.Float64 {
+func (a *Asset) Data() signal.Floating {
 	if a == nil {
 		return nil
 	}
 	return a.data
 }
 
-// NumChannels returns a number of channels of the asset data.
-func (a *Asset) NumChannels() int {
+// Channels returns a number of channels of the asset data.
+func (a *Asset) Channels() int {
 	if a == nil || a.data == nil {
 		return 0
 	}
-	return a.data.NumChannels()
+	return a.data.Channels()
 }
 
 // SampleRate returns a sample rate of the asset.
@@ -67,49 +101,21 @@ type Clip struct {
 // If start position less than zero or more than asset's size, Clip with
 // zero length is returned. If Clip len goes beyond the asset, it's
 // truncated up to length of the asset.
-func (a *Asset) Clip(start int, len int) Clip {
-	size := a.data.Size()
-	if a.data == nil || start >= size || start < 0 {
+func (a *Asset) Clip(start int, length int) Clip {
+	// TODO: not allow empty clips
+	dlen := a.data.Length()
+	if a.data == nil || start >= dlen || start < 0 {
 		return Clip{
 			asset: a,
 		}
 	}
-	end := start + len
-	if end >= size {
-		len = size - start
+	end := start + length
+	if end >= dlen {
+		length = dlen - start
 	}
 	return Clip{
 		asset: a,
 		start: start,
-		len:   len,
+		len:   length,
 	}
-}
-
-// Pump implements clip pump with a data from the asset.
-func (c Clip) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
-	if c.asset == nil || c.asset.Data() == nil {
-		return nil, 0, 0, fmt.Errorf("clip refers to empty asset")
-	}
-	// position where read starts.
-	pos := c.start
-	// end of clip.
-	end := c.start + c.len
-	return func(b signal.Float64) error {
-		if pos >= end {
-			return io.EOF
-		}
-		// not enough samples left to make full read, trim.
-		if end-pos < b.Size() {
-			for i := range b {
-				b[i] = b[i][:end-pos]
-			}
-		}
-
-		// copy values.
-		for i := range b {
-			copy(b[i], c.asset.data[i][pos:])
-		}
-		pos += b.Size()
-		return nil
-	}, c.asset.SampleRate(), c.asset.NumChannels(), nil
 }
