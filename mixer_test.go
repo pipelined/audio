@@ -2,7 +2,6 @@ package audio_test
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"pipelined.dev/audio"
@@ -89,13 +88,6 @@ func TestMixer(t *testing.T) {
 	}
 }
 
-func assertEqual(t *testing.T, name string, result, expected interface{}) {
-	t.Helper()
-	if !reflect.DeepEqual(expected, result) {
-		t.Fatalf("%v\nresult: \t%T\t%+v \nexpected: \t%T\t%+v", name, result, result, expected, expected)
-	}
-}
-
 func Test100Lines(t *testing.T) {
 	run(1, 512, 51200, 100)
 }
@@ -113,7 +105,7 @@ func BenchmarkMixerLines(b *testing.B) {
 }
 
 func run(numChannels, bufferSize, limit, numLines int) {
-	mixer := audio.New(numChannels)
+	mixer := audio.NewMixer(numChannels)
 
 	var lines []pipe.Line
 	valueMultiplier := 1.0 / float64(numLines)

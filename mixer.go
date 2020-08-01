@@ -75,7 +75,7 @@ func (f *frame) add(in signal.Floating) {
 	return
 }
 
-// New returns new mixer.
+// NewMixer returns new mixer.
 func NewMixer(channels int) *Mixer {
 	return &Mixer{
 		numChannels: channels,
