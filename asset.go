@@ -30,16 +30,20 @@ func (a *Asset) Source(start, length int) pipe.SourceAllocatorFunc {
 		pos := 0
 		return pipe.Source{
 				SourceFunc: func(out signal.Floating) (int, error) {
-					if pos == length {
+					if pos == data.Len() {
 						return 0, io.EOF
 					}
-					end := pos + out.Length()
-					if end >= length {
-						end = length
+					end := pos + out.Len()
+					if end > data.Len() {
+						end = data.Len()
 					}
-					read := signal.FloatingAsFloating(data.Slice(pos, end), out)
-					pos = end
-					return read, nil
+					read := 0
+					for pos < end {
+						out.SetSample(read, data.Sample(pos))
+						read++
+						pos++
+					}
+					return read / data.Channels(), nil
 				},
 			}, pipe.SignalProperties{
 				Channels:   a.Channels(),
