@@ -3,6 +3,7 @@ package audio
 import (
 	"io"
 
+	"pipelined.dev/pipe"
 	"pipelined.dev/signal"
 )
 
@@ -11,8 +12,8 @@ type Track struct {
 	numChannels int
 	sampleRate  signal.SampleRate
 
-	start   *link
-	end     *link
+	head    *link
+	tail    *link
 	current *link // next link, that ends after index
 
 	index int // last sent index
@@ -47,15 +48,85 @@ func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 }
 
 // Pump implements track pump with a sequence of not overlapped clips.
-func (t *Track) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
-	return func(b signal.Float64) error {
-		if t.index >= t.endIndex() {
-			return io.EOF
+// func (t *Track) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
+// 	return func(b signal.Float64) error {
+// 		if t.index >= t.endIndex() {
+// 			return io.EOF
+// 		}
+// 		t.nextBuffer(b)
+// 		t.index += b.Length()
+// 		return nil
+// 	}, t.sampleRate, t.numChannels, nil
+// }
+
+func (t *Track) Source(start, end int) pipe.SourceAllocatorFunc {
+	if end == 0 {
+		end = t.endIndex()
+	}
+	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+		return pipe.Source{
+				SourceFunc: trackSource(t.head.nextAfter(start), start, end),
+			},
+			pipe.SignalProperties{
+				Channels:   t.numChannels,
+				SampleRate: t.sampleRate,
+			},
+			nil
+	}
+}
+
+func trackSource(current *link, start, end int) pipe.SourceFunc {
+	pos := start
+	return func(out signal.Floating) (int, error) {
+		if current == nil {
+			return 0, io.EOF
 		}
-		t.nextBuffer(b)
-		t.index += b.Size()
-		return nil
-	}, t.sampleRate, t.numChannels, nil
+
+		// track index where source buffer will end
+		bufferEnd := pos + out.Length()
+		// number of samples read per channel
+		read := 0
+		for pos < bufferEnd {
+			if current == nil {
+				return read, nil
+			}
+			// current clip starts after buffer end
+			if current.At >= bufferEnd {
+				pos = bufferEnd
+				return out.Length(), nil
+			}
+
+			sliceStart := current.start
+			// if link starts within buffer.
+			if offset := current.At - pos; offset < out.Length() && offset > 0 {
+				// don't read data in the offset.
+				read += offset
+				pos += offset
+			} else {
+				sliceStart -= offset
+			}
+
+			var sliceEnd int
+			// if current link ends withing buffer.
+			if bufferEnd > current.End() {
+				sliceEnd = current.start + current.len
+			} else {
+				sliceEnd = sliceStart + out.Length() - read
+			}
+
+			for i := sliceStart; i < sliceEnd; i++ {
+				for c := 0; c < current.asset.data.Channels(); c++ {
+					out.SetSample(signal.BufferIndex(out.Channels(), c, read), current.asset.data.Sample(signal.BufferIndex(current.asset.Channels(), c, i)))
+				}
+				read++
+				pos++
+			}
+			if pos >= current.End() {
+				current = current.nextAfter(pos)
+			}
+		}
+		return read, nil
+	}
 }
 
 // Reset sets track position to 0.
@@ -64,62 +135,63 @@ func (t *Track) Reset(sourceID string) error {
 	return nil
 }
 
-func (t *Track) nextBuffer(b signal.Float64) {
-	bufferEnd := t.index + b.Size()
-	// number of read samples.
-	var read int
-	// read data until buffer is full or no more links till buffer end.
-	for read < b.Size() {
-		if t.current == nil || t.current.At >= bufferEnd {
-			return
-		}
-		sliceStart := t.current.start
-		// if link starts within buffer.
-		if offset := t.current.At - (t.index + read); offset < b.Size() && offset > 0 {
-			// don't read data in the offset.
-			read += offset
-		} else {
-			sliceStart -= offset
-		}
+// func (t *Track) nextBuffer(b signal.Float64) {
+// 	bufferEnd := t.index + b.Length()
+// 	// number of read samples.
+// 	var read int
+// 	// read data until buffer is full or no more links till buffer end.
+// 	for read < b.Length() {
+// 		if t.current == nil || t.current.At >= bufferEnd {
+// 			return
+// 		}
+// 		sliceStart := t.current.start
+// 		// if link starts within buffer.
+// 		if offset := t.current.At - (t.index + read); offset < b.Length() && offset > 0 {
+// 			// don't read data in the offset.
+// 			read += offset
+// 		} else {
+// 			sliceStart -= offset
+// 		}
 
-		var sliceEnd int
-		// if current link ends withing buffer.
-		if bufferEnd > t.current.End() {
-			sliceEnd = t.current.start + t.current.len
-		} else {
-			sliceEnd = sliceStart + b.Size() - read
-		}
+// 		var sliceEnd int
+// 		// if current link ends withing buffer.
+// 		if bufferEnd > t.current.End() {
+// 			sliceEnd = t.current.start + t.current.len
+// 		} else {
+// 			sliceEnd = sliceStart + b.Length() - read
+// 		}
 
-		for i := range b {
-			data := t.current.asset.data[i][sliceStart:sliceEnd]
-			for j := range data {
-				b[i][read+j] = data[j]
-			}
-		}
-		read += (sliceEnd - sliceStart)
+// 		for i := range b {
+// 			data := t.current.asset.data[i][sliceStart:sliceEnd]
+// 			for j := range data {
+// 				b[i][read+j] = data[j]
+// 			}
+// 		}
+// 		read += (sliceEnd - sliceStart)
 
-		if t.index+read >= t.current.End() {
-			t.current = t.linkAfter(t.index + read)
-		}
-	}
-}
+// 		if t.index+read >= t.current.End() {
+// 			t.current = t.linkAfter(t.index + read)
+// 		}
+// 	}
+// }
 
 // linkAfter searches for a first link, that ends after passed index.
-func (t *Track) linkAfter(index int) *link {
-	for l := t.start; l != nil; l = l.Next {
+func (l *link) nextAfter(index int) *link {
+	for l != nil {
 		if l.End() > index {
 			return l
 		}
+		l = l.Next
 	}
 	return nil
 }
 
 // endIndex returns index of last value of last link.
 func (t *Track) endIndex() int {
-	if t.end == nil {
+	if t.tail == nil {
 		return -1
 	}
-	return t.end.At + t.end.len
+	return t.tail.At + t.tail.len
 }
 
 // AddClip to the track. If clip has no asset or zero length, it
@@ -132,7 +204,7 @@ func (t *Track) AddClip(at int, c Clip) {
 
 	// reset current clip after all realignments
 	defer func() {
-		t.current = t.linkAfter(t.index)
+		t.current = t.head.nextAfter(t.index)
 	}()
 
 	// create a new link.
@@ -142,15 +214,15 @@ func (t *Track) AddClip(at int, c Clip) {
 	}
 
 	// if it's the first link.
-	if t.start == nil {
-		t.start = l
-		t.end = l
+	if t.head == nil {
+		t.head = l
+		t.tail = l
 		return
 	}
 
 	// connect new link with next link.
 	var next, prev *link
-	if next = t.linkAfter(at); next != nil {
+	if next = t.head.nextAfter(at); next != nil {
 		if next.At > at {
 			// if next starts after
 			prev = next.Prev
@@ -163,15 +235,15 @@ func (t *Track) AddClip(at int, c Clip) {
 	}
 
 	if next == nil {
-		prev = t.end
-		t.end = l
+		prev = t.tail
+		t.tail = l
 	}
 
 	// connect new link with previous link.
 	if prev != nil {
 		prev.Next = l
 	} else {
-		t.start = l
+		t.head = l
 	}
 	l.Next = next
 	l.Prev = prev
@@ -204,7 +276,7 @@ func (t *Track) alignNextLink(l *link) {
 			if l.Next != nil {
 				l.Next.Prev = l
 			} else {
-				t.end = l
+				t.tail = l
 			}
 			t.alignNextLink(l)
 		}
