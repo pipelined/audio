@@ -24,31 +24,33 @@ func SignalAsset(sampleRate signal.SampleRate, data signal.Floating) *Asset {
 
 // Source implements clip source with a data from the asset.
 func (a *Asset) Source(start, length int) pipe.SourceAllocatorFunc {
-	data := a.data.Slice(start, start+length)
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
-		// read position
-		pos := 0
 		return pipe.Source{
-				SourceFunc: func(out signal.Floating) (int, error) {
-					if pos == data.Len() {
-						return 0, io.EOF
-					}
-					end := pos + out.Len()
-					if end > data.Len() {
-						end = data.Len()
-					}
-					read := 0
-					for pos < end {
-						out.SetSample(read, data.Sample(pos))
-						read++
-						pos++
-					}
-					return read / data.Channels(), nil
-				},
+				SourceFunc: assetSource(a.data.Slice(start, start+length)),
 			}, pipe.SignalProperties{
 				Channels:   a.Channels(),
 				SampleRate: a.SampleRate(),
 			}, nil
+	}
+}
+
+func assetSource(data signal.Floating) pipe.SourceFunc {
+	pos := 0
+	return func(out signal.Floating) (int, error) {
+		if pos == data.Len() {
+			return 0, io.EOF
+		}
+		end := pos + out.Len()
+		if end > data.Len() {
+			end = data.Len()
+		}
+		read := 0
+		for pos < end {
+			out.SetSample(read, data.Sample(pos))
+			read++
+			pos++
+		}
+		return read / data.Channels(), nil
 	}
 }
 
