@@ -47,18 +47,7 @@ func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 	return
 }
 
-// Pump implements track pump with a sequence of not overlapped clips.
-// func (t *Track) Pump(sourceID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
-// 	return func(b signal.Float64) error {
-// 		if t.index >= t.endIndex() {
-// 			return io.EOF
-// 		}
-// 		t.nextBuffer(b)
-// 		t.index += b.Length()
-// 		return nil
-// 	}, t.sampleRate, t.numChannels, nil
-// }
-
+// Source implements track source with a sequence of not overlapped clips.
 func (t *Track) Source(start, end int) pipe.SourceAllocatorFunc {
 	if end == 0 {
 		end = t.endIndex()
@@ -134,46 +123,6 @@ func (t *Track) Reset(sourceID string) error {
 	t.index = 0
 	return nil
 }
-
-// func (t *Track) nextBuffer(b signal.Float64) {
-// 	bufferEnd := t.index + b.Length()
-// 	// number of read samples.
-// 	var read int
-// 	// read data until buffer is full or no more links till buffer end.
-// 	for read < b.Length() {
-// 		if t.current == nil || t.current.At >= bufferEnd {
-// 			return
-// 		}
-// 		sliceStart := t.current.start
-// 		// if link starts within buffer.
-// 		if offset := t.current.At - (t.index + read); offset < b.Length() && offset > 0 {
-// 			// don't read data in the offset.
-// 			read += offset
-// 		} else {
-// 			sliceStart -= offset
-// 		}
-
-// 		var sliceEnd int
-// 		// if current link ends withing buffer.
-// 		if bufferEnd > t.current.End() {
-// 			sliceEnd = t.current.start + t.current.len
-// 		} else {
-// 			sliceEnd = sliceStart + b.Length() - read
-// 		}
-
-// 		for i := range b {
-// 			data := t.current.asset.data[i][sliceStart:sliceEnd]
-// 			for j := range data {
-// 				b[i][read+j] = data[j]
-// 			}
-// 		}
-// 		read += (sliceEnd - sliceStart)
-
-// 		if t.index+read >= t.current.End() {
-// 			t.current = t.linkAfter(t.index + read)
-// 		}
-// 	}
-// }
 
 // linkAfter searches for a first link, that ends after passed index.
 func (l *link) nextAfter(index int) *link {
