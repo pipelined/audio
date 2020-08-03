@@ -23,10 +23,10 @@ func SignalAsset(sampleRate signal.SampleRate, data signal.Floating) *Asset {
 }
 
 // Source implements clip source with a data from the asset.
-func (a Asset) Source(start, length int) pipe.SourceAllocatorFunc {
+func (a Asset) Source(start, end int) pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		return pipe.Source{
-				SourceFunc: assetSource(a.data.Slice(start, start+length)),
+				SourceFunc: assetSource(a.data.Slice(start, end)),
 			}, pipe.SignalProperties{
 				Channels:   a.Channels(),
 				SampleRate: a.SampleRate(),
