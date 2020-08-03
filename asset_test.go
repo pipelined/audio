@@ -82,12 +82,12 @@ func TestAssetSource(t *testing.T) {
 			msg:      "First three",
 		},
 		{
-			source:   a.Source(1, 2),
+			source:   a.Source(1, 3),
 			expected: []float64{1, 2},
 			msg:      "Two from within",
 		},
 		{
-			source:   a.Source(5, 5),
+			source:   a.Source(5, 10),
 			expected: []float64{5, 6, 7, 8, 9},
 			msg:      "Last five",
 		},
