@@ -89,22 +89,7 @@ func (a Asset) SampleRate() signal.SampleRate {
 	return a.sampleRate
 }
 
-// Clip represents a segment of an asset. It refers to a segment of asset
-// data.
-type Clip struct {
-	data signal.Floating
-}
-
 // Clip creates a new clip from the asset with defined start and length.
-func (a Asset) Clip(start int, length int) Clip {
-	return Clip{
-		data: a.data.Slice(start, start+length),
-	}
-}
-
-// Clip creates a new clip from the asset with defined start and length.
-func (c Clip) Clip(start int, length int) Clip {
-	return Clip{
-		data: c.data.Slice(start, start+length),
-	}
+func (a Asset) Clip(start int, length int) signal.Floating {
+	return a.data.Slice(start, start+length)
 }
