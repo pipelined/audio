@@ -12,20 +12,17 @@ type Track struct {
 	numChannels int
 	sampleRate  signal.SampleRate
 
-	head    *link
-	tail    *link
-	current *link // next link, that ends after index
-
-	index int // last sent index
+	head *link
+	tail *link
 }
 
 // stream is a sequence of Clips in track.
 // It uses double-linked list structure.
 type link struct {
-	At int
-	Clip
-	Next *link
-	Prev *link
+	at   int
+	clip Clip
+	next *link
+	prev *link
 }
 
 // End position of the link in the track.
@@ -33,14 +30,13 @@ func (l *link) End() int {
 	if l == nil {
 		return -1
 	}
-	return l.At + l.len
+	return l.at + l.clip.data.Length()
 }
 
 // NewTrack creates a new track. Currently track is not threadsafe.
 // It means that clips couldn't be added during pipe execution.
 func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
 	t = &Track{
-		index:       0,
 		sampleRate:  sampleRate,
 		numChannels: numChannels,
 	}
@@ -80,14 +76,14 @@ func trackSource(current *link, start, end int) pipe.SourceFunc {
 				return read, nil
 			}
 			// current clip starts after buffer end
-			if current.At >= bufferEnd {
+			if current.at >= bufferEnd {
 				pos = bufferEnd
 				return out.Length(), nil
 			}
 
-			sliceStart := current.start
+			sliceStart := 0
 			// if link starts within buffer.
-			if offset := current.At - pos; offset < out.Length() && offset > 0 {
+			if offset := current.at - pos; offset < out.Length() && offset > 0 {
 				// don't read data in the offset.
 				read += offset
 				pos += offset
@@ -98,14 +94,14 @@ func trackSource(current *link, start, end int) pipe.SourceFunc {
 			var sliceEnd int
 			// if current link ends withing buffer.
 			if bufferEnd > current.End() {
-				sliceEnd = current.start + current.len
+				sliceEnd = current.clip.data.Length()
 			} else {
 				sliceEnd = sliceStart + out.Length() - read
 			}
 
 			for i := sliceStart; i < sliceEnd; i++ {
-				for c := 0; c < current.asset.data.Channels(); c++ {
-					out.SetSample(signal.BufferIndex(out.Channels(), c, read), current.asset.data.Sample(signal.BufferIndex(current.asset.Channels(), c, i)))
+				for c := 0; c < current.clip.data.Channels(); c++ {
+					out.SetSample(signal.BufferIndex(out.Channels(), c, read), current.clip.data.Sample(signal.BufferIndex(current.clip.data.Channels(), c, i)))
 				}
 				read++
 				pos++
@@ -118,19 +114,13 @@ func trackSource(current *link, start, end int) pipe.SourceFunc {
 	}
 }
 
-// Reset sets track position to 0.
-func (t *Track) Reset(sourceID string) error {
-	t.index = 0
-	return nil
-}
-
 // linkAfter searches for a first link, that ends after passed index.
 func (l *link) nextAfter(index int) *link {
 	for l != nil {
 		if l.End() > index {
 			return l
 		}
-		l = l.Next
+		l = l.next
 	}
 	return nil
 }
@@ -140,26 +130,16 @@ func (t *Track) endIndex() int {
 	if t.tail == nil {
 		return -1
 	}
-	return t.tail.At + t.tail.len
+	return t.tail.at + t.tail.clip.data.Length()
 }
 
 // AddClip to the track. If clip has no asset or zero length, it
 // won't be added to the track. Overlapped clips are realigned.
 func (t *Track) AddClip(at int, c Clip) {
-	// ignore empty clips.
-	if c.asset == nil || c.len == 0 {
-		return
-	}
-
-	// reset current clip after all realignments
-	defer func() {
-		t.current = t.head.nextAfter(t.index)
-	}()
-
 	// create a new link.
 	l := &link{
-		At:   at,
-		Clip: c,
+		at:   at,
+		clip: c,
 	}
 
 	// if it's the first link.
@@ -172,14 +152,14 @@ func (t *Track) AddClip(at int, c Clip) {
 	// connect new link with next link.
 	var next, prev *link
 	if next = t.head.nextAfter(at); next != nil {
-		if next.At > at {
+		if next.at > at {
 			// if next starts after
-			prev = next.Prev
-			next.Prev = l
+			prev = next.prev
+			next.prev = l
 		} else {
 			// if next starts before
 			prev = next
-			next = next.Next
+			next = next.next
 		}
 	}
 
@@ -190,12 +170,12 @@ func (t *Track) AddClip(at int, c Clip) {
 
 	// connect new link with previous link.
 	if prev != nil {
-		prev.Next = l
+		prev.next = l
 	} else {
 		t.head = l
 	}
-	l.Next = next
-	l.Prev = prev
+	l.next = next
+	l.prev = prev
 
 	// resolve overlaps in the track.
 	t.resolveOverlaps(l)
@@ -208,22 +188,21 @@ func (t *Track) resolveOverlaps(l *link) {
 }
 
 func (t *Track) alignNextLink(l *link) {
-	next := l.Next
+	next := l.next
 	if next == nil {
 		return
 	}
-	overlap := l.At - next.At + l.len
+	overlap := l.at - next.at + l.clip.data.Length()
 	if overlap > 0 {
-		if next.len > overlap {
+		if next.clip.data.Length() > overlap {
 			// shorten next
-			next.start = next.start + overlap
-			next.len = next.len - overlap
-			next.At = next.At + overlap
+			next.clip.data = next.clip.data.Slice(overlap, next.clip.data.Length())
+			next.at = next.at + overlap
 		} else {
 			// remove next
-			l.Next = next.Next
-			if l.Next != nil {
-				l.Next.Prev = l
+			l.next = next.next
+			if l.next != nil {
+				l.next.prev = l
 			} else {
 				t.tail = l
 			}
@@ -233,18 +212,16 @@ func (t *Track) alignNextLink(l *link) {
 }
 
 func (t *Track) alignPrevLink(l *link) {
-	prev := l.Prev
+	prev := l.prev
 	if prev == nil {
 		return
 	}
-	overlap := prev.At - l.At + prev.len
+	overlap := prev.End() - l.at
 	if overlap > 0 {
-		prev.len = prev.len - overlap
-		if overlap > l.len {
-			at := l.At + l.len
-			start := overlap + l.len + l.At - prev.At
-			len := overlap - l.len
-			t.AddClip(at, prev.asset.Clip(start, len))
+		prev.clip.data = prev.clip.data.Slice(0, prev.clip.data.Length()-overlap)
+		if overlap > l.clip.data.Length() {
+			at := l.at + l.clip.data.Length()
+			t.AddClip(at, prev.clip.Clip(overlap+l.clip.data.Length()-1, overlap-l.clip.data.Length())) // -1 because slicing includes left index
 		}
 	}
 }

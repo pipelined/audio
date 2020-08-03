@@ -23,7 +23,7 @@ func SignalAsset(sampleRate signal.SampleRate, data signal.Floating) *Asset {
 }
 
 // Source implements clip source with a data from the asset.
-func (a *Asset) Source(start, length int) pipe.SourceAllocatorFunc {
+func (a Asset) Source(start, length int) pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		return pipe.Source{
 				SourceFunc: assetSource(a.data.Slice(start, start+length)),
@@ -72,56 +72,39 @@ func (a *Asset) Sink() pipe.SinkAllocatorFunc {
 }
 
 // Data returns asset's data.
-func (a *Asset) Data() signal.Floating {
-	if a == nil {
-		return nil
-	}
+func (a Asset) Data() signal.Floating {
 	return a.data
 }
 
 // Channels returns a number of channels of the asset data.
-func (a *Asset) Channels() int {
-	if a == nil || a.data == nil {
+func (a Asset) Channels() int {
+	if a.data == nil {
 		return 0
 	}
 	return a.data.Channels()
 }
 
 // SampleRate returns a sample rate of the asset.
-func (a *Asset) SampleRate() signal.SampleRate {
-	if a == nil {
-		return 0
-	}
+func (a Asset) SampleRate() signal.SampleRate {
 	return a.sampleRate
 }
 
-// Clip represents a segment of an asset. It keeps reference to the
-// asset, but doesn't copy its data.
+// Clip represents a segment of an asset. It refers to a segment of asset
+// data.
 type Clip struct {
-	asset *Asset
-	start int
-	len   int
+	data signal.Floating
 }
 
 // Clip creates a new clip from the asset with defined start and length.
-// If start position less than zero or more than asset's size, Clip with
-// zero length is returned. If Clip len goes beyond the asset, it's
-// truncated up to length of the asset.
-func (a *Asset) Clip(start int, length int) Clip {
-	// TODO: not allow empty clips
-	dlen := a.data.Length()
-	if a.data == nil || start >= dlen || start < 0 {
-		return Clip{
-			asset: a,
-		}
-	}
-	end := start + length
-	if end >= dlen {
-		length = dlen - start
-	}
+func (a Asset) Clip(start int, length int) Clip {
 	return Clip{
-		asset: a,
-		start: start,
-		len:   length,
+		data: a.data.Slice(start, start+length),
+	}
+}
+
+// Clip creates a new clip from the asset with defined start and length.
+func (c Clip) Clip(start int, length int) Clip {
+	return Clip{
+		data: c.data.Slice(start, start+length),
 	}
 }
