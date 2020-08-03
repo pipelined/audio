@@ -29,7 +29,7 @@ func TestTrack(t *testing.T) {
 
 	type clip struct {
 		position int
-		audio.Clip
+		data     signal.Floating
 	}
 	tests := []struct {
 		clips    []clip
@@ -78,10 +78,10 @@ func TestTrack(t *testing.T) {
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 5)},
+				{2, asset1.Clip(3, 6)},
 				{4, asset2.Clip(5, 2)},
 			},
-			expected: []float64{0, 0, 13, 14, 25, 26, 17},
+			expected: []float64{0, 0, 13, 14, 25, 26, 17, 18},
 			msg:      "Overlap single in the middle",
 		},
 		{
@@ -119,26 +119,12 @@ func TestTrack(t *testing.T) {
 			expected: []float64{0, 21, 22, 23, 24, 25, 26, 27, 28},
 			msg:      "Overlap two completely",
 		},
-		// {
-		// 	expected: []float64{},
-		// 	msg:      "Empty",
-		// },
-		// panics
-		// {
-		// 	clips: []clip{
-		// 		{2, asset3.Clip(3, 2)},
-		// 		{5, asset3.Clip(5, 2)},
-		// 		{1, asset3.Clip(1, 8)},
-		// 	},
-		// 	expected: []float64{},
-		// 	msg:      "Empty asset clips",
-		// },
 	}
 
 	for _, test := range tests {
 		track := audio.NewTrack(sampleRate, channels)
 		for _, clip := range test.clips {
-			track.AddClip(clip.position, clip.Clip)
+			track.AddClip(clip.position, clip.data)
 		}
 
 		sink := &mock.Sink{}

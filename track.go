@@ -20,7 +20,7 @@ type Track struct {
 // It uses double-linked list structure.
 type link struct {
 	at   int
-	clip Clip
+	data signal.Floating
 	next *link
 	prev *link
 }
@@ -30,7 +30,7 @@ func (l *link) End() int {
 	if l == nil {
 		return -1
 	}
-	return l.at + l.clip.data.Length()
+	return l.at + l.data.Length()
 }
 
 // NewTrack creates a new track. Currently track is not threadsafe.
@@ -94,14 +94,14 @@ func trackSource(current *link, start, end int) pipe.SourceFunc {
 			var sliceEnd int
 			// if current link ends withing buffer.
 			if bufferEnd > current.End() {
-				sliceEnd = current.clip.data.Length()
+				sliceEnd = current.data.Length()
 			} else {
 				sliceEnd = sliceStart + out.Length() - read
 			}
 
 			for i := sliceStart; i < sliceEnd; i++ {
-				for c := 0; c < current.clip.data.Channels(); c++ {
-					out.SetSample(signal.BufferIndex(out.Channels(), c, read), current.clip.data.Sample(signal.BufferIndex(current.clip.data.Channels(), c, i)))
+				for c := 0; c < current.data.Channels(); c++ {
+					out.SetSample(signal.BufferIndex(out.Channels(), c, read), current.data.Sample(signal.BufferIndex(current.data.Channels(), c, i)))
 				}
 				read++
 				pos++
@@ -130,16 +130,16 @@ func (t *Track) endIndex() int {
 	if t.tail == nil {
 		return -1
 	}
-	return t.tail.at + t.tail.clip.data.Length()
+	return t.tail.at + t.tail.data.Length()
 }
 
 // AddClip to the track. If clip has no asset or zero length, it
 // won't be added to the track. Overlapped clips are realigned.
-func (t *Track) AddClip(at int, c Clip) {
+func (t *Track) AddClip(at int, data signal.Floating) {
 	// create a new link.
 	l := &link{
 		at:   at,
-		clip: c,
+		data: data,
 	}
 
 	// if it's the first link.
@@ -192,11 +192,11 @@ func (t *Track) alignNextLink(l *link) {
 	if next == nil {
 		return
 	}
-	overlap := l.at - next.at + l.clip.data.Length()
+	overlap := l.End() - next.at
 	if overlap > 0 {
-		if next.clip.data.Length() > overlap {
+		if next.data.Length() > overlap {
 			// shorten next
-			next.clip.data = next.clip.data.Slice(overlap, next.clip.data.Length())
+			next.data = next.data.Slice(overlap, next.data.Length())
 			next.at = next.at + overlap
 		} else {
 			// remove next
@@ -218,10 +218,12 @@ func (t *Track) alignPrevLink(l *link) {
 	}
 	overlap := prev.End() - l.at
 	if overlap > 0 {
-		prev.clip.data = prev.clip.data.Slice(0, prev.clip.data.Length()-overlap)
-		if overlap > l.clip.data.Length() {
-			at := l.at + l.clip.data.Length()
-			t.AddClip(at, prev.clip.Clip(overlap+l.clip.data.Length()-1, overlap-l.clip.data.Length())) // -1 because slicing includes left index
+		prevLen := prev.data.Length()
+		prev.data = prev.data.Slice(0, prevLen-overlap)
+		// need to split previous clip
+		if overlap > l.data.Length() {
+			at := l.at + l.data.Length()
+			t.AddClip(at, prev.data.Slice(prevLen-l.data.Length(), prevLen)) // -1 because slicing includes left index
 		}
 	}
 }
