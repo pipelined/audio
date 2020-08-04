@@ -49,9 +49,9 @@ func TestAssetSink(t *testing.T) {
 
 		pipe.New(context.Background(), pipe.WithLines(l)).Wait()
 
-		assertEqual(t, "channels", asset.Data().Channels(), test.numChannels)
-		assertEqual(t, "sample rate", asset.SampleRate(), sampleRate)
-		assertEqual(t, "samples", asset.Data().Length(), test.samples)
+		assertEqual(t, "channels", asset.Channels(), test.numChannels)
+		assertEqual(t, "sample rate", asset.SampleRate, sampleRate)
+		assertEqual(t, "samples", asset.Length(), test.samples)
 	}
 }
 
@@ -65,14 +65,17 @@ func TestAssetSource(t *testing.T) {
 	signal.WriteStripedFloat64(sampleData, floats)
 	sampleRate := signal.SampleRate(44100)
 
-	a := audio.SignalAsset(sampleRate, floats)
+	a := audio.Asset{
+		SampleRate: sampleRate,
+		Floating:   floats,
+	}
 	tests := []struct {
 		source   pipe.SourceAllocatorFunc
 		expected []float64
 		msg      string
 	}{
 		{
-			source:   a.Source(0, a.Data().Length()),
+			source:   a.Source(0, a.Length()),
 			expected: []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 			msg:      "Full asset",
 		},
@@ -91,17 +94,6 @@ func TestAssetSource(t *testing.T) {
 			expected: []float64{5, 6, 7, 8, 9},
 			msg:      "Last five",
 		},
-		// panics
-		// {
-		// 	source:   a.Source(5, 10),
-		// 	expected: []float64{5, 6, 7, 8, 9},
-		// 	msg:      "Last five",
-		// },
-		// {
-		// 	source:   a.Source(-1, 10),
-		// 	expected: []float64{},
-		// 	msg:      "Negative start",
-		// },
 	}
 
 	bufferSize := 2
