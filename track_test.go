@@ -127,7 +127,10 @@ func TestTrack(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		track := audio.NewTrack(sampleRate, channels)
+		track := audio.Track{
+			SampleRate: sampleRate,
+			Channels:   channels,
+		}
 		for _, clip := range test.clips {
 			track.AddClip(clip.position, clip.data)
 		}
