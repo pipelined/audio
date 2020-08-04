@@ -1,10 +1,25 @@
 package audio
 
 import (
+	"context"
+	"errors"
 	"io"
-	"sync"
 
+	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/pooling"
 	"pipelined.dev/signal"
+)
+
+var (
+	// ErrDifferentSampleRates is returned when signals with different
+	// sample rates are sinked into mixer.
+	ErrDifferentSampleRates = errors.New("sinking different sample rates")
+	// ErrDifferentChannels is returned when signals with different number
+	// of channels are sinked into mixer.
+	ErrDifferentChannels = errors.New("sinking different channels")
+	// ErrSinkFlushTimeout is returned when sink flush exceeds the context
+	// timeout.
+	ErrSinkFlushTimeout = errors.New("sink flush timeout")
 )
 
 // Mixer summs up multiple channels of messages into a single channel.
@@ -12,211 +27,178 @@ type Mixer struct {
 	sampleRate  signal.SampleRate
 	numChannels int
 
-	// frames ready for mix
-	output chan *frame
-	// signal that all sinks are done
-	done chan struct{}
+	pool  *signal.Pool
+	input chan inputSignal
 
-	// mutex is needed to synchronize access to the mixer
-	m sync.Mutex
-	// inputs
-	inputs map[string]*input
-	// number of active inputs, used to fill the frames
-	activeInputs int
-	// first frame, used to initialize inputs
-	firstFrame *frame
-	// id of the pipe which is output of mixer
-	outputID string
-}
-
-type message struct {
-	inputID string
-	buffer  signal.Float64
-}
-
-type input struct {
-	id          string
-	numChannels int
-	frame       *frame
+	frames []*frame
+	head   *frame
 }
 
 // frame represents a slice of samples to mix.
 type frame struct {
-	sync.Mutex
-	buffer   signal.Float64
-	summed   int
-	expected int
 	next     *frame
+	buffer   signal.Floating
+	expected int
+	added    int
+	flushed  int
+	length   int // https://github.com/pipelined/mixer/issues/5
+}
+
+type inputSignal struct {
+	input  int
+	buffer signal.Floating
 }
 
 // sum returns mixed samplein.
-func (f *frame) copySum(b signal.Float64) {
-	// shrink result buffer if needed.
-	if b.Size() > f.buffer.Size() {
-		for i := range f.buffer {
-			b[i] = b[i][:f.buffer.Size()]
-		}
+func (f *frame) sum() bool {
+	if f.added == 0 || f.added+f.flushed != f.expected {
+		return false
 	}
-	// copy summed data.
-	for i := 0; i < b.NumChannels(); i++ {
-		for j := 0; j < b.Size(); j++ {
-			b[i][j] = f.buffer[i][j] / float64(f.summed)
-		}
+	if f.buffer.Length() != f.length {
+		f.buffer = f.buffer.Slice(0, f.length)
 	}
+	for i := 0; i < f.buffer.Len(); i++ {
+		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
+	}
+	return true
 }
 
-func (f *frame) add(b signal.Float64) {
-	// expand frame buffer if needed.
-	if diff := b.Size() - f.buffer.Size(); diff > 0 {
-		for i := range f.buffer {
-			f.buffer[i] = append(f.buffer[i], make([]float64, diff)...)
-		}
+func (f *frame) add(in signal.Floating) {
+	f.added++
+	l := min(f.buffer.Len(), in.Len())
+	for i := 0; i < l; i++ {
+		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
 	}
-
-	// copy summed data.
-	for i := 0; i < b.NumChannels(); i++ {
-		for j := 0; j < b.Size(); j++ {
-			f.buffer[i][j] += b[i][j]
-		}
+	if f.length < in.Length() {
+		f.length = in.Length()
 	}
-	f.summed++
+	return
 }
-
-const (
-	maxInputs = 1024
-)
 
 // NewMixer returns new mixer.
-func NewMixer(numChannels int) *Mixer {
-	m := Mixer{
-		inputs:      make(map[string]*input),
-		numChannels: numChannels,
+func NewMixer(channels int) *Mixer {
+	return &Mixer{
+		numChannels: channels,
+		input:       make(chan inputSignal, 1),
+		head:        &frame{},
 	}
-	m.reset()
-	return &m
 }
 
-// reset structures required for new run.
-func (m *Mixer) reset() {
-	m.output = make(chan *frame)
-	m.done = make(chan struct{})
-	m.firstFrame = newFrame(len(m.inputs), m.numChannels)
-}
+// Source provides mixer source allocator. Mixer source outputs mixed
+// signal. Only single source per mixer is allowed.
+func (m *Mixer) Source() pipe.SourceAllocatorFunc {
+	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+		m.pool = pooling.Get(signal.Allocator{
+			Channels: m.numChannels,
+			Length:   bufferSize, // https://github.com/pipelined/mixer/issues/5
+			Capacity: bufferSize,
+		})
+		output := make(chan signal.Floating, 1)
+		go mixer(m.pool, m.frames, m.input, output)
 
-// Sink registers new input. All inputs should have same number of channels.
-// If different number of channels is provided, error will be returned.
-func (m *Mixer) Sink(inputID string, sampleRate signal.SampleRate, numChannels int) (func(signal.Float64) error, error) {
-	m.sampleRate = sampleRate
-	m.firstFrame.expected++
-	in := input{
-		id:          inputID,
-		frame:       m.firstFrame,
-		numChannels: numChannels,
+		// this is needed to enable garbage collection
+		m.frames = nil
+		m.head = nil
+		return pipe.Source{
+				SourceFunc: func(out signal.Floating) (int, error) {
+					if sum, ok := <-output; ok {
+						defer m.pool.PutFloat64(sum)
+						return signal.FloatingAsFloating(sum, out), nil
+					}
+					return 0, io.EOF
+				},
+				FlushFunc: func(context.Context) error {
+					return nil
+				},
+			}, pipe.SignalProperties{
+				Channels:   m.numChannels,
+				SampleRate: m.sampleRate,
+			}, nil
 	}
-	// add new input.
-	m.inputs[inputID] = &in
-	m.activeInputs++
-	var (
-		done    bool
-		current *frame
-	)
-	return func(b signal.Float64) error {
-		current = in.frame
-		current.Lock()
-		current.add(b)
-		done = current.done()
-		// move input to the next frame.
-		if current.next == nil {
-			current.next = newFrame(current.expected, m.numChannels)
-		}
-		current.Unlock()
-		in.frame = current.next
-
-		// send if done.
-		if done {
-			m.output <- current
-		}
-		return nil
-	}, nil
 }
 
-// Pump returns a pump function which allows to read the out channel.
-func (m *Mixer) Pump(outputID string) (func(signal.Float64) error, signal.SampleRate, int, error) {
-	numChannels := m.numChannels
-	m.outputID = outputID
-	return func(b signal.Float64) error {
-		select {
-		case f := <-m.output: // receive new frame.
-			f.copySum(b)
-			return nil
-		case <-m.done: // recieve done signal.
-			select {
-			case f := <-m.output: // try to receive flushed frames.
-				f.copySum(b)
-				return nil
-			default:
-				return io.EOF
+func mixer(pool *signal.Pool, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
+	defer close(output)
+	inputs := len(frames)
+	for inputs > 0 {
+		is := <-input
+		f := frames[is.input]
+
+		// flush the signal
+		if is.buffer == nil {
+			frames[is.input] = nil
+			inputs--
+			for current := f; current != nil; current = current.next {
+				current.flushed++
+				if current.sum() {
+					output <- current.buffer
+				}
+			}
+			continue
+		}
+
+		if f.buffer == nil {
+			f.buffer = pool.GetFloat64()
+		}
+		f.add(is.buffer)
+		pool.PutFloat64(is.buffer)
+		if f.sum() {
+			output <- f.buffer
+		}
+		if f.next == nil {
+			// flushed sinks are not expected anymore
+			f.next = &frame{
+				expected: f.expected - f.flushed,
 			}
 		}
-
-	}, m.sampleRate, numChannels, nil
+		frames[is.input] = f.next
+	}
 }
 
-// Flush mixer data for defined source.
-// All Flush calls are synchronized. It doesn't affect Sink/Pump goroutines.
-func (m *Mixer) Flush(sourceID string) error {
-	m.m.Lock()
-	defer m.m.Unlock()
-
-	// flush pump.
-	if m.isOutput(sourceID) {
-		m.reset()
-		for _, in := range m.inputs {
-			in.frame = m.firstFrame
+// Sink provides mixer sink allocator. Mixer sink receives a signal for
+// mixing. Multiple sinks per mixer is allowed.
+func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
+	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+		if m.sampleRate == 0 {
+			m.sampleRate = props.SampleRate
+		} else if m.sampleRate != props.SampleRate {
+			return pipe.Sink{}, ErrDifferentSampleRates
 		}
-		return nil
-	}
-
-	var (
-		done    bool
-		current *frame
-		in      = m.inputs[sourceID]
-	)
-	// reset expectations for remaining frames.
-	for in.frame != nil {
-		current = in.frame
-		current.Lock()
-		current.expected--
-		done = current.done()
-		in.frame = current.next
-		current.Unlock()
-
-		// send if done.
-		if done {
-			m.output <- current
+		if m.numChannels != props.Channels {
+			return pipe.Sink{}, ErrDifferentChannels
 		}
+		input := len(m.frames)
+		m.frames = append(m.frames, m.head)
+		m.head.expected++
+		return pipe.Sink{
+			SinkFunc: func(floats signal.Floating) error {
+				// sink new buffer
+				inputBuffer := m.pool.GetFloat64()
+				copied := signal.FloatingAsFloating(floats, inputBuffer)
+				if copied != inputBuffer.Length() {
+					inputBuffer = inputBuffer.Slice(0, copied)
+				}
+				m.input <- inputSignal{
+					input:  input,
+					buffer: inputBuffer,
+				}
+				return nil
+			},
+			FlushFunc: func(ctx context.Context) error {
+				select {
+				case m.input <- inputSignal{input: input}:
+				case <-ctx.Done():
+					return ErrSinkFlushTimeout
+				}
+				return nil
+			},
+		}, nil
 	}
-	// remove input from actives.
-	m.activeInputs--
-	if m.activeInputs == 0 {
-		close(m.done)
-	}
-	return nil
 }
 
-func (m *Mixer) isOutput(sourceID string) bool {
-	return sourceID == m.outputID
-}
-
-// isReady checks if frame is completed.
-func (f *frame) done() bool {
-	return f.expected > 0 && f.expected == f.summed
-}
-
-// newFrame generates new frame based on number of inputs.
-func newFrame(numInputs, numChannels int) *frame {
-	return &frame{
-		expected: numInputs,
-		buffer:   make([][]float64, numChannels),
+func min(n1, n2 int) int {
+	if n1 < n2 {
+		return n1
 	}
+	return n2
 }

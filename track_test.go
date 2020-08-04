@@ -1,176 +1,152 @@
 package audio_test
 
 import (
+	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"pipelined.dev/audio"
+	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/mock"
 	"pipelined.dev/signal"
 )
 
 func TestTrack(t *testing.T) {
+	channels := 1
+	alloc := signal.Allocator{
+		Channels: channels,
+		Capacity: 10,
+		Length:   10,
+	}
+	samples1 := alloc.Float64()
+	signal.WriteFloat64([]float64{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, samples1)
+	samples2 := alloc.Float64()
+	signal.WriteFloat64([]float64{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}, samples2)
+
 	sampleRate := signal.SampleRate(44100)
-	bufferSize := 2
-	asset1 := audio.SignalAsset(sampleRate, [][]float64{{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}})
-	asset2 := audio.SignalAsset(sampleRate, [][]float64{{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}})
-	asset3 := &audio.Asset{}
+	asset1 := audio.Asset{
+		SampleRate: sampleRate,
+		Floating:   samples1,
+	}
+	asset2 := audio.Asset{
+		SampleRate: sampleRate,
+		Floating:   samples2,
+	}
+
+	type clip struct {
+		position int
+		data     signal.Floating
+	}
 	tests := []struct {
-		clips    []audio.Clip
-		clipsAt  []int
-		expected [][]float64
+		clips    []clip
+		expected []float64
 		msg      string
 	}{
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 1),
-				asset2.Clip(5, 3),
+			clips: []clip{
+				{3, asset1.Slice(3, 4)},
+				{4, asset2.Slice(5, 8)},
 			},
-			clipsAt:  []int{3, 4},
-			expected: [][]float64{{0, 0, 0, 13, 25, 26, 27, 0}},
+			expected: []float64{0, 0, 0, 13, 25, 26, 27},
 			msg:      "Sequence",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 1),
-				asset2.Clip(5, 3),
+			clips: []clip{
+				{2, asset1.Slice(3, 4)},
+				{3, asset2.Slice(5, 8)},
 			},
-			clipsAt:  []int{3, 4},
-			expected: [][]float64{{0, 0, 0, 13, 25, 26, 27, 0}},
-			msg:      "Sequence increased bufferSize",
-		},
-		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 1),
-				asset2.Clip(5, 3),
-			},
-			clipsAt:  []int{2, 3},
-			expected: [][]float64{{0, 0, 13, 25, 26, 27}},
+			expected: []float64{0, 0, 13, 25, 26, 27},
 			msg:      "Sequence shifted left",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 1),
-				asset2.Clip(5, 3),
+			clips: []clip{
+				{2, asset1.Slice(3, 4)},
+				{4, asset2.Slice(5, 8)},
 			},
-			clipsAt:  []int{2, 4},
-			expected: [][]float64{{0, 0, 13, 0, 25, 26, 27, 0}},
+			expected: []float64{0, 0, 13, 0, 25, 26, 27},
 			msg:      "Sequence with interval",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 3),
-				asset2.Clip(5, 2),
+			clips: []clip{
+				{3, asset1.Slice(3, 6)},
+				{2, asset2.Slice(5, 7)},
 			},
-			clipsAt:  []int{3, 2},
-			expected: [][]float64{{0, 0, 25, 26, 14, 15}},
+			expected: []float64{0, 0, 25, 26, 14, 15},
 			msg:      "Overlap previous",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 3),
-				asset2.Clip(5, 2),
+			clips: []clip{
+				{2, asset1.Slice(3, 6)},
+				{4, asset2.Slice(5, 7)},
 			},
-			clipsAt:  []int{2, 4},
-			expected: [][]float64{{0, 0, 13, 14, 25, 26}},
+			expected: []float64{0, 0, 13, 14, 25, 26},
 			msg:      "Overlap next",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 5),
-				asset2.Clip(5, 2),
+			clips: []clip{
+				{2, asset1.Slice(3, 9)},
+				{4, asset2.Slice(5, 7)},
 			},
-			clipsAt:  []int{2, 4},
-			expected: [][]float64{{0, 0, 13, 14, 25, 26, 17, 0}},
+			expected: []float64{0, 0, 13, 14, 25, 26, 17, 18},
 			msg:      "Overlap single in the middle",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 2),
-				asset1.Clip(3, 2),
-				asset2.Clip(5, 2),
+			clips: []clip{
+				{2, asset1.Slice(3, 5)},
+				{5, asset1.Slice(3, 5)},
+				{4, asset2.Slice(5, 7)},
 			},
-			clipsAt:  []int{2, 5, 4},
-			expected: [][]float64{{0, 0, 13, 14, 25, 26, 14, 0}},
+			expected: []float64{0, 0, 13, 14, 25, 26, 14},
 			msg:      "Overlap two in the middle",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 2),
-				asset1.Clip(5, 2),
-				asset2.Clip(3, 2),
+			clips: []clip{
+				{2, asset1.Slice(3, 5)},
+				{5, asset1.Slice(5, 7)},
+				{3, asset2.Slice(3, 5)},
 			},
-			clipsAt:  []int{2, 5, 3},
-			expected: [][]float64{{0, 0, 13, 23, 24, 15, 16, 0}},
+			expected: []float64{0, 0, 13, 23, 24, 15, 16},
 			msg:      "Overlap two in the middle shifted",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 2),
-				asset2.Clip(3, 5),
+			clips: []clip{
+				{2, asset1.Slice(3, 5)},
+				{2, asset2.Slice(3, 8)},
 			},
-			clipsAt:  []int{2, 2},
-			expected: [][]float64{{0, 0, 23, 24, 25, 26, 27, 0}},
+			expected: []float64{0, 0, 23, 24, 25, 26, 27},
 			msg:      "Overlap single completely",
 		},
 		{
-			clips: []audio.Clip{
-				asset1.Clip(3, 2),
-				asset1.Clip(5, 2),
-				asset2.Clip(1, 8),
+			clips: []clip{
+				{2, asset1.Slice(3, 5)},
+				{5, asset1.Slice(5, 7)},
+				{1, asset2.Slice(1, 9)},
 			},
-			clipsAt:  []int{2, 5, 1},
-			expected: [][]float64{{0, 21, 22, 23, 24, 25, 26, 27, 28, 0}},
+			expected: []float64{0, 21, 22, 23, 24, 25, 26, 27, 28},
 			msg:      "Overlap two completely",
-		},
-		{
-			expected: [][]float64{},
-			msg:      "Empty",
-		},
-		{
-			clips: []audio.Clip{
-				asset3.Clip(3, 2),
-				asset3.Clip(5, 2),
-				asset3.Clip(1, 8),
-			},
-			clipsAt:  []int{2, 5, 1},
-			expected: [][]float64{},
-			msg:      "Empty asset clips",
 		},
 	}
 
 	for _, test := range tests {
-		track := audio.NewTrack(sampleRate, asset1.NumChannels())
-		err := track.Reset("")
-		assert.Nil(t, err)
-
-		for i, clip := range test.clips {
-			track.AddClip(test.clipsAt[i], clip)
+		track := audio.Track{
+			SampleRate: sampleRate,
+			Channels:   channels,
+		}
+		for _, clip := range test.clips {
+			track.AddClip(clip.position, clip.data)
 		}
 
-		fn, pumpSampleRate, pumpNumChannels, err := track.Pump("")
-		assert.Equal(t, sampleRate, pumpSampleRate)
-		assert.Equal(t, asset1.NumChannels(), pumpNumChannels)
-		assert.Nil(t, err)
-		assert.NotNil(t, fn)
+		sink := &mock.Sink{}
 
-		var result signal.Float64
-		for {
-			buf := signal.Float64Buffer(pumpNumChannels, bufferSize)
-			err = fn(buf)
-			if err != nil {
-				break
-			}
-			result = result.Append(buf)
-		}
-		assert.NotNil(t, err)
+		l, _ := pipe.Routing{
+			Source: track.Source(0, 0),
+			Sink:   sink.Sink(),
+		}.Line(2)
 
-		assert.Equal(t, len(test.expected), result.NumChannels(), test.msg)
-		for i := 0; i < len(result); i++ {
-			assert.Equal(t, len(test.expected[i]), len(result[i]), test.msg)
-			for j := 0; j < len(result[i]); j++ {
-				assert.Equal(t, test.expected[i][j], result[i][j], test.msg)
-			}
-		}
+		pipe.New(context.Background(), pipe.WithLines(l)).Wait()
+
+		result := make([]float64, sink.Values.Len())
+		signal.ReadFloat64(sink.Values, result)
+
+		assertEqual(t, test.msg, result, test.expected)
 	}
 }
