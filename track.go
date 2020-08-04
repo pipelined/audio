@@ -9,8 +9,8 @@ import (
 
 // Track is a sequence of pipes which are executed one after another.
 type Track struct {
-	numChannels int
-	sampleRate  signal.SampleRate
+	signal.SampleRate
+	Channels int
 
 	head *link
 	tail *link
@@ -33,16 +33,6 @@ func (l *link) End() int {
 	return l.at + l.data.Length()
 }
 
-// NewTrack creates a new track. Currently track is not threadsafe.
-// It means that clips couldn't be added during pipe execution.
-func NewTrack(sampleRate signal.SampleRate, numChannels int) (t *Track) {
-	t = &Track{
-		sampleRate:  sampleRate,
-		numChannels: numChannels,
-	}
-	return
-}
-
 // Source implements track source with a sequence of not overlapped clips.
 func (t *Track) Source(start, end int) pipe.SourceAllocatorFunc {
 	if end == 0 {
@@ -53,8 +43,8 @@ func (t *Track) Source(start, end int) pipe.SourceAllocatorFunc {
 				SourceFunc: trackSource(t.head.nextAfter(start), start, end),
 			},
 			pipe.SignalProperties{
-				Channels:   t.numChannels,
-				SampleRate: t.sampleRate,
+				Channels:   t.Channels,
+				SampleRate: t.SampleRate,
 			},
 			nil
 	}
