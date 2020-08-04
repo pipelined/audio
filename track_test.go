@@ -23,9 +23,14 @@ func TestTrack(t *testing.T) {
 	signal.WriteFloat64([]float64{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}, samples2)
 
 	sampleRate := signal.SampleRate(44100)
-	asset1 := audio.SignalAsset(sampleRate, samples1)
-	asset2 := audio.SignalAsset(sampleRate, samples2)
-	// asset3 := &audio.Asset{}
+	asset1 := audio.Asset{
+		SampleRate: sampleRate,
+		Floating:   samples1,
+	}
+	asset2 := audio.Asset{
+		SampleRate: sampleRate,
+		Floating:   samples2,
+	}
 
 	type clip struct {
 		position int
@@ -38,83 +43,83 @@ func TestTrack(t *testing.T) {
 	}{
 		{
 			clips: []clip{
-				{3, asset1.Clip(3, 1)},
-				{4, asset2.Clip(5, 3)},
+				{3, asset1.Slice(3, 4)},
+				{4, asset2.Slice(5, 8)},
 			},
 			expected: []float64{0, 0, 0, 13, 25, 26, 27},
 			msg:      "Sequence",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 1)},
-				{3, asset2.Clip(5, 3)},
+				{2, asset1.Slice(3, 4)},
+				{3, asset2.Slice(5, 8)},
 			},
 			expected: []float64{0, 0, 13, 25, 26, 27},
 			msg:      "Sequence shifted left",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 1)},
-				{4, asset2.Clip(5, 3)},
+				{2, asset1.Slice(3, 4)},
+				{4, asset2.Slice(5, 8)},
 			},
 			expected: []float64{0, 0, 13, 0, 25, 26, 27},
 			msg:      "Sequence with interval",
 		},
 		{
 			clips: []clip{
-				{3, asset1.Clip(3, 3)},
-				{2, asset2.Clip(5, 2)},
+				{3, asset1.Slice(3, 6)},
+				{2, asset2.Slice(5, 7)},
 			},
 			expected: []float64{0, 0, 25, 26, 14, 15},
 			msg:      "Overlap previous",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 3)},
-				{4, asset2.Clip(5, 2)},
+				{2, asset1.Slice(3, 6)},
+				{4, asset2.Slice(5, 7)},
 			},
 			expected: []float64{0, 0, 13, 14, 25, 26},
 			msg:      "Overlap next",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 6)},
-				{4, asset2.Clip(5, 2)},
+				{2, asset1.Slice(3, 9)},
+				{4, asset2.Slice(5, 7)},
 			},
 			expected: []float64{0, 0, 13, 14, 25, 26, 17, 18},
 			msg:      "Overlap single in the middle",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 2)},
-				{5, asset1.Clip(3, 2)},
-				{4, asset2.Clip(5, 2)},
+				{2, asset1.Slice(3, 5)},
+				{5, asset1.Slice(3, 5)},
+				{4, asset2.Slice(5, 7)},
 			},
 			expected: []float64{0, 0, 13, 14, 25, 26, 14},
 			msg:      "Overlap two in the middle",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 2)},
-				{5, asset1.Clip(5, 2)},
-				{3, asset2.Clip(3, 2)},
+				{2, asset1.Slice(3, 5)},
+				{5, asset1.Slice(5, 7)},
+				{3, asset2.Slice(3, 5)},
 			},
 			expected: []float64{0, 0, 13, 23, 24, 15, 16},
 			msg:      "Overlap two in the middle shifted",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 2)},
-				{2, asset2.Clip(3, 5)},
+				{2, asset1.Slice(3, 5)},
+				{2, asset2.Slice(3, 8)},
 			},
 			expected: []float64{0, 0, 23, 24, 25, 26, 27},
 			msg:      "Overlap single completely",
 		},
 		{
 			clips: []clip{
-				{2, asset1.Clip(3, 2)},
-				{5, asset1.Clip(5, 2)},
-				{1, asset2.Clip(1, 8)},
+				{2, asset1.Slice(3, 5)},
+				{5, asset1.Slice(5, 7)},
+				{1, asset2.Slice(1, 9)},
 			},
 			expected: []float64{0, 21, 22, 23, 24, 25, 26, 27, 28},
 			msg:      "Overlap two completely",

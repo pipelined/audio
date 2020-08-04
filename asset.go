@@ -8,28 +8,20 @@ import (
 )
 
 // Asset is a sink which uses a regular buffer as underlying storage.
-// It can be used to make Clips and use them for processing input.
+// It can be used to slice signals and use it for processing input.
 type Asset struct {
-	sampleRate signal.SampleRate
-	data       signal.Floating
-}
-
-// SignalAsset creates new asset with signal.Floating buffer data.
-func SignalAsset(sampleRate signal.SampleRate, data signal.Floating) *Asset {
-	return &Asset{
-		sampleRate: sampleRate,
-		data:       data,
-	}
+	signal.SampleRate
+	signal.Floating
 }
 
 // Source implements clip source with a data from the asset.
 func (a Asset) Source(start, end int) pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		return pipe.Source{
-				SourceFunc: assetSource(a.data.Slice(start, end)),
+				SourceFunc: assetSource(a.Floating.Slice(start, end)),
 			}, pipe.SignalProperties{
 				Channels:   a.Channels(),
-				SampleRate: a.SampleRate(),
+				SampleRate: a.SampleRate,
 			}, nil
 	}
 }
@@ -57,39 +49,16 @@ func assetSource(data signal.Floating) pipe.SourceFunc {
 // Sink appends buffers to asset.
 func (a *Asset) Sink() pipe.SinkAllocatorFunc {
 	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
-		a.sampleRate = props.SampleRate
-		a.data = signal.Allocator{
+		a.SampleRate = props.SampleRate
+		a.Floating = signal.Allocator{
 			Channels: props.Channels,
 			Capacity: bufferSize,
 		}.Float64()
 		return pipe.Sink{
 			SinkFunc: func(in signal.Floating) error {
-				a.data = a.data.Append(in)
+				a.Floating = a.Floating.Append(in)
 				return nil
 			},
 		}, nil
 	}
-}
-
-// Data returns asset's data.
-func (a Asset) Data() signal.Floating {
-	return a.data
-}
-
-// Channels returns a number of channels of the asset data.
-func (a Asset) Channels() int {
-	if a.data == nil {
-		return 0
-	}
-	return a.data.Channels()
-}
-
-// SampleRate returns a sample rate of the asset.
-func (a Asset) SampleRate() signal.SampleRate {
-	return a.sampleRate
-}
-
-// Clip creates a new clip from the asset with defined start and length.
-func (a Asset) Clip(start int, length int) signal.Floating {
-	return a.data.Slice(start, start+length)
 }
