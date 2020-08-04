@@ -1,118 +1,134 @@
 package audio_test
 
 import (
-	"io"
+	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"pipelined.dev/audio"
+
+	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/mock"
 	"pipelined.dev/signal"
 )
 
 func TestMixer(t *testing.T) {
-	const numTracks = 2
+	type generator struct {
+		messages int
+		value    float64
+	}
 	tests := []struct {
 		description string
-		messages    [numTracks]int
-		values      [numTracks]float64
-		expected    [][]float64
+		generators  []generator
+		expected    []float64
 	}{
 		{
 			description: "1st run",
-			messages: [numTracks]int{
-				4,
-				3,
+			generators: []generator{
+				{
+					messages: 8,
+					value:    0.7,
+				},
+				{
+					messages: 6,
+					value:    0.5,
+				},
 			},
-			values: [numTracks]float64{
-				0.7,
-				0.5,
-			},
-			expected: [][]float64{{0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.7, 0.7}},
+			expected: []float64{0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.7, 0.7},
 		},
-		// {
-		// 	description: "2nd run",
-		// 	messages: [numTracks]int{
-		// 		5,
-		// 		4,
-		// 	},
-		// 	values: [numTracks]float64{
-		// 		0.5,
-		// 		0.7,
-		// 	},
-		// 	expected: [][]float64{{0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.5, 0.5}},
-		// },
+		{
+			description: "2nd run",
+			generators: []generator{
+				{
+					messages: 5,
+					value:    0.5,
+				},
+				{
+					messages: 4,
+					value:    0.7,
+				},
+			},
+			expected: []float64{0.6, 0.6, 0.6, 0.6, 0.5},
+		},
 	}
 
-	var (
-		sampleRate  = signal.SampleRate(44100)
+	const (
+		// sampleRate  = signal.SampleRate(44100)
 		numChannels = 1
 		bufferSize  = 2
-		pumpID      = string("pumpID")
 	)
-
-	mixer := audio.NewMixer(numChannels)
-
-	// init sink funcs
-	sinks := make([]func(signal.Float64) error, numTracks)
-	for i := 0; i < numTracks; i++ {
-		var err error
-		sinks[i], err = mixer.Sink(string(i), sampleRate, numChannels)
-		assert.Nil(t, err)
-	}
-	// init pump func
-	pump, _, _, err := mixer.Pump(pumpID)
-	assert.Nil(t, err)
-
 	for _, test := range tests {
-		result := signal.Float64(make([][]float64, numChannels))
-		// mixing cycle
-		for i := 0; i < numTracks; i++ {
-			go func(i int, messages int, value float64, sinkFn func(signal.Float64) error) {
-				// err := audio.Reset(string(i))
-				// assert.Nil(t, err)
-				for i := 0; i < messages; i++ {
-					buf := buf(numChannels, bufferSize, value)
-					err := sinkFn(buf)
-					assert.NoError(t, err)
-				}
-				err := mixer.Flush(string(i))
-				assert.NoError(t, err)
-			}(i, test.messages[i], test.values[i], sinks[i])
-		}
-		// err = audio.Reset(pumpID)
-		// assert.Nil(t, err)
-		for {
-			buffer := signal.Float64Buffer(numChannels, bufferSize)
-			if err := pump(buffer); err != nil {
-				assert.Equal(t, io.EOF, err)
-				break
-			}
-			if buffer != nil {
-				result = result.Append(buffer)
-			}
-		}
-		err = mixer.Flush(pumpID)
-		assert.NoError(t, err)
-		// fmt.Printf("%+v", result)
+		mixer := audio.NewMixer(numChannels)
 
-		assert.Equal(t, len(test.expected), result.NumChannels(), "Incorrect result num channels")
-		for i := range test.expected {
-			assert.Equal(t, len(test.expected[i]), len(result[i]), "Incorrect result channel length")
-			for j, val := range result[i] {
-				assert.Equal(t, val, result[i][j])
+		var lines []pipe.Line
+		for _, gen := range test.generators {
+			sourceAllocator := mock.Source{
+				Channels: numChannels,
+				Limit:    gen.messages,
+				Value:    gen.value,
 			}
+			line, _ := pipe.Routing{
+				Source: sourceAllocator.Source(),
+				Sink:   mixer.Sink(),
+			}.Line(bufferSize)
+			lines = append(lines, line)
 		}
+		sink := mock.Sink{}
+		line, _ := pipe.Routing{
+			Source: mixer.Source(),
+			Sink:   sink.Sink(),
+		}.Line(bufferSize)
+		lines = append(lines, line)
+
+		err := pipe.New(context.Background(), pipe.WithLines(lines...)).Wait()
+		assertEqual(t, "error", err, nil)
+
+		result := make([]float64, sink.Values.Len())
+		signal.ReadFloat64(sink.Values, result)
+		assertEqual(t, "result", result, test.expected)
 	}
 }
 
-func buf(numChannels, size int, value float64) [][]float64 {
-	result := make([][]float64, numChannels)
-	for i := range result {
-		result[i] = make([]float64, size)
-		for j := range result[i] {
-			result[i][j] = value
-		}
+func Test100Lines(t *testing.T) {
+	run(1, 512, 51200, 100)
+}
+
+func BenchmarkMixerLimit(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		run(1, 512, i*2, 10)
 	}
-	return result
+}
+
+func BenchmarkMixerLines(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		run(1, 512, 51200, i+1)
+	}
+}
+
+func run(numChannels, bufferSize, limit, numLines int) {
+	mixer := audio.NewMixer(numChannels)
+
+	var lines []pipe.Line
+	valueMultiplier := 1.0 / float64(numLines)
+	for i := 0; i < numLines; i++ {
+		sourceAllocator := mock.Source{
+			Channels: numChannels,
+			Limit:    limit,
+			Value:    float64(i) * valueMultiplier,
+		}
+		line, _ := pipe.Routing{
+			Source: sourceAllocator.Source(),
+			Sink:   mixer.Sink(),
+		}.Line(bufferSize)
+		lines = append(lines, line)
+	}
+	sink := mock.Sink{
+		Discard: true,
+	}
+	line, _ := pipe.Routing{
+		Source: mixer.Source(),
+		Sink:   sink.Sink(),
+	}.Line(bufferSize)
+	lines = append(lines, line)
+
+	pipe.New(context.Background(), pipe.WithLines(lines...)).Wait()
 }
