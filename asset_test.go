@@ -41,7 +41,7 @@ func TestAssetSink(t *testing.T) {
 	bufferSize := 10
 
 	for _, test := range tests {
-		asset := &audio.Floating{}
+		asset := &audio.Asset{}
 		l, _ := pipe.Routing{
 			Source: test.source,
 			Sink:   asset.Sink(),
@@ -65,7 +65,7 @@ func TestAssetSource(t *testing.T) {
 	signal.WriteStripedFloat64(sampleData, floats)
 	sampleRate := signal.SampleRate(44100)
 
-	a := audio.Floating{
+	a := audio.Asset{
 		SampleRate: sampleRate,
 		Signal:     floats,
 	}

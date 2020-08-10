@@ -23,11 +23,11 @@ func TestTrack(t *testing.T) {
 	signal.WriteFloat64([]float64{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}, samples2)
 
 	sampleRate := signal.SampleRate(44100)
-	asset1 := audio.Floating{
+	asset1 := audio.Asset{
 		SampleRate: sampleRate,
 		Signal:     samples1,
 	}
-	asset2 := audio.Floating{
+	asset2 := audio.Asset{
 		SampleRate: sampleRate,
 		Signal:     samples2,
 	}
