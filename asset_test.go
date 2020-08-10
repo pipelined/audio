@@ -41,7 +41,7 @@ func TestAssetSink(t *testing.T) {
 	bufferSize := 10
 
 	for _, test := range tests {
-		asset := &audio.Asset{}
+		asset := &audio.Floating{}
 		l, _ := pipe.Routing{
 			Source: test.source,
 			Sink:   asset.Sink(),
@@ -49,9 +49,9 @@ func TestAssetSink(t *testing.T) {
 
 		pipe.New(context.Background(), pipe.WithLines(l)).Wait()
 
-		assertEqual(t, "channels", asset.Channels(), test.numChannels)
+		assertEqual(t, "channels", asset.Signal.Channels(), test.numChannels)
 		assertEqual(t, "sample rate", asset.SampleRate, sampleRate)
-		assertEqual(t, "samples", asset.Length(), test.samples)
+		assertEqual(t, "samples", asset.Signal.Length(), test.samples)
 	}
 }
 
@@ -65,9 +65,9 @@ func TestAssetSource(t *testing.T) {
 	signal.WriteStripedFloat64(sampleData, floats)
 	sampleRate := signal.SampleRate(44100)
 
-	a := audio.Asset{
+	a := audio.Floating{
 		SampleRate: sampleRate,
-		Floating:   floats,
+		Signal:     floats,
 	}
 	tests := []struct {
 		source   pipe.SourceAllocatorFunc
@@ -75,22 +75,22 @@ func TestAssetSource(t *testing.T) {
 		msg      string
 	}{
 		{
-			source:   a.Source(0, a.Length()),
+			source:   audio.Source(a.SampleRate, a.Signal),
 			expected: []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 			msg:      "Full asset",
 		},
 		{
-			source:   a.Source(0, 3),
+			source:   audio.Source(a.SampleRate, a.Signal.Slice(0, 3)),
 			expected: []float64{0, 1, 2},
 			msg:      "First three",
 		},
 		{
-			source:   a.Source(1, 3),
+			source:   audio.Source(a.SampleRate, a.Signal.Slice(1, 3)),
 			expected: []float64{1, 2},
 			msg:      "Two from within",
 		},
 		{
-			source:   a.Source(5, 10),
+			source:   audio.Source(a.SampleRate, a.Signal.Slice(5, 10)),
 			expected: []float64{5, 6, 7, 8, 9},
 			msg:      "Last five",
 		},
