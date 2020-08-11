@@ -14,6 +14,16 @@ type Asset struct {
 	Signal signal.Floating
 }
 
+// NewAsset creates an Asset with a preallocated signal buffer
+func NewAsset(channels, capacity int) *Asset {
+	return &Asset{
+		Signal: signal.Allocator{
+			Channels: channels,
+			Capacity: capacity,
+		}.Float64(),
+	}
+}
+
 // Source implements signal source for any signal type.
 func Source(sr signal.SampleRate, s signal.Signal) pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
@@ -103,4 +113,9 @@ func (a *Asset) Sink() pipe.SinkAllocatorFunc {
 			},
 		}, nil
 	}
+}
+
+// Source is a convenience wrapper to audio.Source
+func (a *Asset) Source() pipe.SourceAllocatorFunc {
+	return Source(a.SampleRate, a.Signal)
 }
