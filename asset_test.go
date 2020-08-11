@@ -55,42 +55,38 @@ func TestAssetSink(t *testing.T) {
 	}
 }
 
-func TestAssetSource(t *testing.T) {
+func TestSource(t *testing.T) {
 	sampleData := [][]float64{{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}}
-	floats := signal.Allocator{
+	buf := signal.Allocator{
 		Channels: len(sampleData),
 		Length:   len(sampleData[0]),
 		Capacity: len(sampleData[0]),
 	}.Float64()
-	signal.WriteStripedFloat64(sampleData, floats)
+	signal.WriteStripedFloat64(sampleData, buf)
 	sampleRate := signal.SampleRate(44100)
 
-	a := audio.Asset{
-		SampleRate: sampleRate,
-		Signal:     floats,
-	}
 	tests := []struct {
 		source   pipe.SourceAllocatorFunc
 		expected []float64
 		msg      string
 	}{
 		{
-			source:   audio.Source(a.SampleRate, a.Signal),
+			source:   audio.Source(sampleRate, buf),
 			expected: []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 			msg:      "Full asset",
 		},
 		{
-			source:   audio.Source(a.SampleRate, a.Signal.Slice(0, 3)),
+			source:   audio.Source(sampleRate, buf.Slice(0, 3)),
 			expected: []float64{0, 1, 2},
 			msg:      "First three",
 		},
 		{
-			source:   audio.Source(a.SampleRate, a.Signal.Slice(1, 3)),
+			source:   audio.Source(sampleRate, buf.Slice(1, 3)),
 			expected: []float64{1, 2},
 			msg:      "Two from within",
 		},
 		{
-			source:   audio.Source(a.SampleRate, a.Signal.Slice(5, 10)),
+			source:   audio.Source(sampleRate, buf.Slice(5, 10)),
 			expected: []float64{5, 6, 7, 8, 9},
 			msg:      "Last five",
 		},
