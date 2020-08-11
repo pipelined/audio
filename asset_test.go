@@ -50,7 +50,7 @@ func TestAssetSink(t *testing.T) {
 		pipe.New(context.Background(), pipe.WithLines(l)).Wait()
 
 		assertEqual(t, "channels", asset.Signal.Channels(), test.numChannels)
-		assertEqual(t, "sample rate", asset.SampleRate, sampleRate)
+		assertEqual(t, "sample rate", asset.SampleRate(), sampleRate)
 		assertEqual(t, "samples", asset.Signal.Length(), test.samples)
 	}
 }
