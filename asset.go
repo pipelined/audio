@@ -8,7 +8,9 @@ import (
 )
 
 // Asset is a sink which uses a regular buffer as underlying storage. It
-// can be used to slice signal data and use it as processing input. Buffer type can
+// can be used to slice signal data and use it as processing input. It's
+// possible to use an arbitrary signal type as a buffer. Float64 is used by
+// default.
 type Asset struct {
 	signal.Signal
 	sampleRate signal.SampleRate
