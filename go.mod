@@ -6,3 +6,5 @@ require (
 )
 
 go 1.13
+
+replace pipelined.dev/signal => ../signal
