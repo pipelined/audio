@@ -19,16 +19,16 @@ func Source(sr signal.SampleRate, s signal.Signal) pipe.SourceAllocatorFunc {
 	}
 }
 
-func signalSource(s signal.Signal) pipe.SourceFunc {
+func signalSource(s signal.Signal) (sourceFn pipe.SourceFunc) {
 	switch v := s.(type) {
 	case signal.Signed:
-		return signedSource(v)
+		sourceFn = signedSource(v)
 	case signal.Unsigned:
-		return unsignedSource(v)
+		sourceFn = unsignedSource(v)
 	case signal.Floating:
-		return floatingSource(v)
+		sourceFn = floatingSource(v)
 	}
-	panic("should never happen")
+	return
 }
 
 func floatingSource(data signal.Floating) pipe.SourceFunc {
