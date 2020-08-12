@@ -14,6 +14,7 @@ func TestAssetSink(t *testing.T) {
 	sampleRate := signal.SampleRate(44100)
 	tests := []struct {
 		source      pipe.SourceAllocatorFunc
+		asset       *audio.Asset
 		numChannels int
 		samples     int
 	}{
@@ -24,6 +25,7 @@ func TestAssetSink(t *testing.T) {
 				Limit:      100,
 				SampleRate: sampleRate,
 			}).Source(),
+			asset:       &audio.Asset{},
 			numChannels: 1,
 			samples:     100,
 		},
@@ -34,6 +36,71 @@ func TestAssetSink(t *testing.T) {
 				Limit:      1000,
 				SampleRate: sampleRate,
 			}).Source(),
+			asset: &audio.Asset{
+				Signal: signal.Allocator{
+					Channels: 2,
+				}.Int64(signal.MaxBitDepth),
+			},
+			numChannels: 2,
+			samples:     1000,
+		},
+		{
+			source: (&mock.Source{
+				Channels:   1,
+				Value:      0.5,
+				Limit:      100,
+				SampleRate: sampleRate,
+			}).Source(),
+			asset: &audio.Asset{
+				Signal: signal.Allocator{
+					Channels: 1,
+				}.Int64(signal.MaxBitDepth),
+			},
+			numChannels: 1,
+			samples:     100,
+		},
+		{
+			source: (&mock.Source{
+				Channels:   2,
+				Value:      0.7,
+				Limit:      1000,
+				SampleRate: sampleRate,
+			}).Source(),
+			asset: &audio.Asset{
+				Signal: signal.Allocator{
+					Channels: 2,
+				}.Int64(signal.MaxBitDepth),
+			},
+			numChannels: 2,
+			samples:     1000,
+		},
+		{
+			source: (&mock.Source{
+				Channels:   1,
+				Value:      0.5,
+				Limit:      100,
+				SampleRate: sampleRate,
+			}).Source(),
+			asset: &audio.Asset{
+				Signal: signal.Allocator{
+					Channels: 1,
+				}.Uint64(signal.MaxBitDepth),
+			},
+			numChannels: 1,
+			samples:     100,
+		},
+		{
+			source: (&mock.Source{
+				Channels:   2,
+				Value:      0.7,
+				Limit:      1000,
+				SampleRate: sampleRate,
+			}).Source(),
+			asset: &audio.Asset{
+				Signal: signal.Allocator{
+					Channels: 2,
+				}.Uint64(signal.MaxBitDepth),
+			},
 			numChannels: 2,
 			samples:     1000,
 		},
@@ -41,16 +108,15 @@ func TestAssetSink(t *testing.T) {
 	bufferSize := 10
 
 	for _, test := range tests {
-		asset := &audio.Asset{}
 		l, _ := pipe.Routing{
 			Source: test.source,
-			Sink:   asset.Sink(),
+			Sink:   test.asset.Sink(),
 		}.Line(bufferSize)
 
 		pipe.New(context.Background(), pipe.WithLines(l)).Wait()
 
-		assertEqual(t, "channels", asset.Signal.Channels(), test.numChannels)
-		assertEqual(t, "sample rate", asset.SampleRate(), sampleRate)
-		assertEqual(t, "samples", asset.Signal.Length(), test.samples)
+		assertEqual(t, "channels", test.asset.Signal.Channels(), test.numChannels)
+		assertEqual(t, "sample rate", test.asset.SampleRate(), sampleRate)
+		assertEqual(t, "samples", test.asset.Signal.Length(), test.samples)
 	}
 }

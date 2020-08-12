@@ -20,15 +20,16 @@ func (a *Asset) SampleRate() signal.SampleRate {
 }
 
 // Sink uses signal.Floating buffer to store signal data.
-func (a *Asset) Sink() pipe.SinkAllocatorFunc {
+func (a *Asset) Sink() (result pipe.SinkAllocatorFunc) {
 	switch a.Signal.(type) {
 	case signal.Signed:
-		return a.sinkSigned()
+		result = a.sinkSigned()
 	case signal.Unsigned:
+		result = a.sinkUnsigned()
 	default:
-		return a.sinkFloating()
+		result = a.sinkFloating()
 	}
-	return nil
+	return
 }
 
 func (a *Asset) sinkFloating() pipe.SinkAllocatorFunc {
@@ -68,7 +69,7 @@ func (a *Asset) sinkSigned() pipe.SinkAllocatorFunc {
 			Channels: props.Channels,
 			Capacity: bufferSize,
 			Length:   bufferSize,
-		}.Int8(signal.MaxBitDepth)
+		}.Int64(data.BitDepth())
 		pos := 0
 		return pipe.Sink{
 			SinkFunc: func(in signal.Floating) error {
@@ -93,7 +94,7 @@ func (a *Asset) sinkUnsigned() pipe.SinkAllocatorFunc {
 			Channels: props.Channels,
 			Capacity: bufferSize,
 			Length:   bufferSize,
-		}.Uint8(signal.MaxBitDepth)
+		}.Uint64(data.BitDepth())
 		pos := 0
 		return pipe.Sink{
 			SinkFunc: func(in signal.Floating) error {
