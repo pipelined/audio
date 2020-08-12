@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"fmt"
 	"io"
 
 	"pipelined.dev/pipe"
@@ -20,7 +21,7 @@ type Track struct {
 // It uses double-linked list structure.
 type link struct {
 	at   int
-	data signal.Floating
+	data signal.Signal
 	next *link
 	prev *link
 }
@@ -88,14 +89,12 @@ func trackSource(current *link, start, end int) pipe.SourceFunc {
 			} else {
 				sliceEnd = sliceStart + out.Length() - read
 			}
-
-			for i := sliceStart; i < sliceEnd; i++ {
-				for c := 0; c < current.data.Channels(); c++ {
-					out.SetSample(signal.BufferIndex(out.Channels(), c, read), current.data.Sample(signal.BufferIndex(current.data.Channels(), c, i)))
-				}
-				read++
-				pos++
+			n := signal.AsFloating(signal.Slice(current.data, sliceStart, sliceEnd), out.Slice(read, out.Length()))
+			if n == 0 {
+				fmt.Printf("ZERO!")
 			}
+			read += n
+			pos += n
 			if pos >= current.End() {
 				current = current.nextAfter(pos)
 			}
@@ -125,7 +124,7 @@ func (t *Track) endIndex() int {
 
 // AddClip to the track. If clip has no asset or zero length, it
 // won't be added to the track. Overlapped clips are realigned.
-func (t *Track) AddClip(at int, data signal.Floating) {
+func (t *Track) AddClip(at int, data signal.Signal) {
 	// create a new link.
 	l := &link{
 		at:   at,
@@ -186,7 +185,7 @@ func (t *Track) alignNextLink(l *link) {
 	if overlap > 0 {
 		if next.data.Length() > overlap {
 			// shorten next
-			next.data = next.data.Slice(overlap, next.data.Length())
+			next.data = signal.Slice(next.data, overlap, next.data.Length())
 			next.at = next.at + overlap
 		} else {
 			// remove next
@@ -209,11 +208,12 @@ func (t *Track) alignPrevLink(l *link) {
 	overlap := prev.End() - l.at
 	if overlap > 0 {
 		prevLen := prev.data.Length()
-		prev.data = prev.data.Slice(0, prevLen-overlap)
+		prev.data = signal.Slice(prev.data, 0, prevLen-overlap)
 		// need to split previous clip
 		if overlap > l.data.Length() {
 			at := l.at + l.data.Length()
-			t.AddClip(at, prev.data.Slice(prevLen-l.data.Length(), prevLen)) // -1 because slicing includes left index
+			t.AddClip(at, signal.Slice(prev.data, prevLen-l.data.Length(), prevLen)) // -1 because slicing includes left index
 		}
+		// TODO: handle full overlap
 	}
 }
