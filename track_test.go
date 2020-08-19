@@ -118,10 +118,7 @@ func TestTrack(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		track := audio.Track{
-			SampleRate: sampleRate,
-			Channels:   channels,
-		}
+		track := audio.Track{}
 		for _, clip := range test.clips {
 			track.AddClip(clip.position, clip.data)
 		}
@@ -129,7 +126,7 @@ func TestTrack(t *testing.T) {
 		sink := &mock.Sink{}
 
 		l, _ := pipe.Routing{
-			Source: track.Source(0, 0),
+			Source: track.Source(sampleRate, 0, 0),
 			Sink:   sink.Sink(),
 		}.Line(2)
 

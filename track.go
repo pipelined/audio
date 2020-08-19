@@ -3,6 +3,7 @@ package audio
 import (
 	"fmt"
 	"io"
+	"sync"
 
 	"pipelined.dev/pipe"
 	"pipelined.dev/signal"
@@ -10,8 +11,8 @@ import (
 
 // Track is a sequence of pipes which are executed one after another.
 type Track struct {
-	signal.SampleRate
-	Channels int
+	once     sync.Once
+	channels int
 
 	head *link
 	tail *link
@@ -35,7 +36,7 @@ func (l *link) End() int {
 }
 
 // Source implements track source with a sequence of not overlapped clips.
-func (t *Track) Source(start, end int) pipe.SourceAllocatorFunc {
+func (t *Track) Source(sampleRate signal.SampleRate, start, end int) pipe.SourceAllocatorFunc {
 	if end == 0 {
 		end = t.endIndex()
 	}
@@ -44,8 +45,8 @@ func (t *Track) Source(start, end int) pipe.SourceAllocatorFunc {
 				SourceFunc: trackSource(t.head.nextAfter(start), start, end),
 			},
 			pipe.SignalProperties{
-				Channels:   t.Channels,
-				SampleRate: t.SampleRate,
+				Channels:   t.channels,
+				SampleRate: sampleRate,
 			},
 			nil
 	}
@@ -125,6 +126,12 @@ func (t *Track) endIndex() int {
 // AddClip to the track. If clip has no asset or zero length, it
 // won't be added to the track. Overlapped clips are realigned.
 func (t *Track) AddClip(at int, data signal.Signal) {
+	t.once.Do(func() {
+		t.channels = data.Channels()
+	})
+	if t.channels != data.Channels() {
+		panic(fmt.Sprintf("unexpected number of channels: %d want: %d", data.Channels(), t.channels))
+	}
 	// create a new link.
 	l := &link{
 		at:   at,
