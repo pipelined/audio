@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"pipelined.dev/pipe"
 	"pipelined.dev/pipe/pooling"
@@ -22,26 +23,17 @@ var (
 	ErrSinkFlushTimeout = errors.New("sink flush timeout")
 )
 
-// Mixer summs up multiple channels of messages into a single channel.
+// Mixer summs up multiple signals. It has multiple sinks and a single
+// source.
 type Mixer struct {
-	sampleRate  signal.SampleRate
-	numChannels int
+	once       sync.Once
+	sampleRate signal.SampleRate
+	channels   int
+	input      chan inputSignal
+	head       *frame
 
-	pool  *signal.Pool
-	input chan inputSignal
-
+	pool   *signal.Pool
 	frames []*frame
-	head   *frame
-}
-
-// frame represents a slice of samples to mix.
-type frame struct {
-	next     *frame
-	buffer   signal.Floating
-	expected int
-	added    int
-	flushed  int
-	length   int // https://github.com/pipelined/mixer/issues/5
 }
 
 type inputSignal struct {
@@ -49,47 +41,27 @@ type inputSignal struct {
 	buffer signal.Floating
 }
 
-// sum returns mixed samplein.
-func (f *frame) sum() bool {
-	if f.added == 0 || f.added+f.flushed != f.expected {
-		return false
+func (m *Mixer) init(sampleRate signal.SampleRate, channels int) func() {
+	return func() {
+		m.channels = channels
+		m.sampleRate = sampleRate
+		m.head = &frame{}
+		m.input = make(chan inputSignal, 1)
 	}
-	if f.buffer.Length() != f.length {
-		f.buffer = f.buffer.Slice(0, f.length)
-	}
-	for i := 0; i < f.buffer.Len(); i++ {
-		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
-	}
-	return true
 }
 
-func (f *frame) add(in signal.Floating) {
-	f.added++
-	l := min(f.buffer.Len(), in.Len())
-	for i := 0; i < l; i++ {
-		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
-	}
-	if f.length < in.Length() {
-		f.length = in.Length()
-	}
-	return
-}
-
-// NewMixer returns new mixer.
-func NewMixer(channels int) *Mixer {
-	return &Mixer{
-		numChannels: channels,
-		input:       make(chan inputSignal, 1),
-		head:        &frame{},
-	}
+func mustInitialized() {
+	panic("mixer sink must be bound before source")
 }
 
 // Source provides mixer source allocator. Mixer source outputs mixed
-// signal. Only single source per mixer is allowed.
+// signal. Only single source per mixer is allowed. Must be called after
+// Sink, otherwise will panic.
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+		m.once.Do(mustInitialized) // check that source is bound after sink.
 		m.pool = pooling.Get(signal.Allocator{
-			Channels: m.numChannels,
+			Channels: m.channels,
 			Length:   bufferSize, // https://github.com/pipelined/mixer/issues/5
 			Capacity: bufferSize,
 		})
@@ -111,7 +83,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 					return nil
 				},
 			}, pipe.SignalProperties{
-				Channels:   m.numChannels,
+				Channels:   m.channels,
 				SampleRate: m.sampleRate,
 			}, nil
 	}
@@ -159,12 +131,11 @@ func mixer(pool *signal.Pool, frames []*frame, input <-chan inputSignal, output 
 // mixing. Multiple sinks per mixer is allowed.
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
-		if m.sampleRate == 0 {
-			m.sampleRate = props.SampleRate
-		} else if m.sampleRate != props.SampleRate {
+		m.once.Do(m.init(props.SampleRate, props.Channels))
+		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
 		}
-		if m.numChannels != props.Channels {
+		if m.channels != props.Channels {
 			return pipe.Sink{}, ErrDifferentChannels
 		}
 		input := len(m.frames)
@@ -201,4 +172,40 @@ func min(n1, n2 int) int {
 		return n1
 	}
 	return n2
+}
+
+// frame represents a slice of samples to mix.
+type frame struct {
+	next     *frame
+	buffer   signal.Floating
+	expected int
+	added    int
+	flushed  int
+	length   int // https://github.com/pipelined/mixer/issues/5
+}
+
+// sum returns mixed samplein.
+func (f *frame) sum() bool {
+	if f.added == 0 || f.added+f.flushed != f.expected {
+		return false
+	}
+	if f.buffer.Length() != f.length {
+		f.buffer = f.buffer.Slice(0, f.length)
+	}
+	for i := 0; i < f.buffer.Len(); i++ {
+		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
+	}
+	return true
+}
+
+func (f *frame) add(in signal.Floating) {
+	f.added++
+	l := min(f.buffer.Len(), in.Len())
+	for i := 0; i < l; i++ {
+		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
+	}
+	if f.length < in.Length() {
+		f.length = in.Length()
+	}
+	return
 }
