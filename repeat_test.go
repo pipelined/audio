@@ -75,7 +75,7 @@ func TestAddRouting(t *testing.T) {
 	line := pipe.Routing{
 		Sink: sink2.Sink(),
 	}
-	p.Push(repeater.AddLine(p, line))
+	p.Push(repeater.AddOutput(p, line))
 
 	// start
 	_ = p.Wait()
@@ -87,8 +87,11 @@ func TestAddRouting(t *testing.T) {
 
 // This benchmark runs the following pipe:
 // 1 Source is repeated to 2 Sinks
-func BenchmarkRepeat2(b *testing.B) {
+func BenchmarkRepeat(b *testing.B) {
 	source := &mock.Source{
+		Mutator: mock.Mutator{
+			Mutability: mutability.Mutable(),
+		},
 		Limit:    862 * bufferSize,
 		Channels: 2,
 	}

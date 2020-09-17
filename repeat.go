@@ -8,7 +8,6 @@ import (
 
 	"pipelined.dev/pipe"
 	"pipelined.dev/pipe/mutability"
-	"pipelined.dev/pipe/pooling"
 	"pipelined.dev/signal"
 )
 
@@ -32,11 +31,7 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 		r.sampleRate = props.SampleRate
 		r.channels = props.Channels
 		r.bufferSize = bufferSize
-		p := pooling.Get(signal.Allocator{
-			Channels: props.Channels,
-			Length:   bufferSize,
-			Capacity: bufferSize,
-		})
+		p := signal.GetPoolAllocator(props.Channels, bufferSize, bufferSize)
 		return pipe.Sink{
 			Mutability: r.Mutability,
 			SinkFunc: func(in signal.Floating) error {
@@ -61,8 +56,8 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 	}
 }
 
-// AddLine adds the line to the repeater. Will panic if repeater is immutable.
-func (r *Repeater) AddLine(p pipe.Pipe, route pipe.Routing) mutability.Mutation {
+// AddOutput adds the line to the repeater. Will panic if repeater is immutable.
+func (r *Repeater) AddOutput(p *pipe.Pipe, route pipe.Routing) mutability.Mutation {
 	return r.Mutability.Mutate(func() error {
 		route.Source = r.Source()
 		line, err := route.Line(r.bufferSize)
@@ -79,11 +74,7 @@ func (r *Repeater) Source() pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		source := make(chan message, 1)
 		r.sources = append(r.sources, source)
-		p := pooling.Get(signal.Allocator{
-			Channels: r.channels,
-			Length:   bufferSize,
-			Capacity: bufferSize,
-		})
+		p := signal.GetPoolAllocator(r.channels, bufferSize, bufferSize)
 		var (
 			message message
 			ok      bool
@@ -96,7 +87,7 @@ func (r *Repeater) Source() pipe.SourceAllocatorFunc {
 					}
 					read := signal.FloatingAsFloating(message.buffer, b)
 					if atomic.AddInt32(&message.sources, -1) == 0 {
-						p.PutFloat64(message.buffer)
+						message.buffer.Free(p)
 					}
 					return read, nil
 				},

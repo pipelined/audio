@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"pipelined.dev/pipe"
-	"pipelined.dev/pipe/pooling"
 	"pipelined.dev/signal"
 )
 
@@ -32,7 +31,7 @@ type Mixer struct {
 	input      chan inputSignal
 	head       *frame
 
-	pool   *signal.Pool
+	pool   *signal.PoolAllocator
 	frames []*frame
 }
 
@@ -60,11 +59,7 @@ func mustInitialized() {
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		m.once.Do(mustInitialized) // check that source is bound after sink.
-		m.pool = pooling.Get(signal.Allocator{
-			Channels: m.channels,
-			Length:   bufferSize, // https://github.com/pipelined/mixer/issues/5
-			Capacity: bufferSize,
-		})
+		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
 		output := make(chan signal.Floating, 1)
 		go mixer(m.pool, m.frames, m.input, output)
 
@@ -74,7 +69,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 		return pipe.Source{
 				SourceFunc: func(out signal.Floating) (int, error) {
 					if sum, ok := <-output; ok {
-						defer m.pool.PutFloat64(sum)
+						defer sum.Free(m.pool)
 						return signal.FloatingAsFloating(sum, out), nil
 					}
 					return 0, io.EOF
@@ -89,7 +84,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	}
 }
 
-func mixer(pool *signal.Pool, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
+func mixer(pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
 	defer close(output)
 	inputs := len(frames)
 	for inputs > 0 {
@@ -113,7 +108,7 @@ func mixer(pool *signal.Pool, frames []*frame, input <-chan inputSignal, output 
 			f.buffer = pool.GetFloat64()
 		}
 		f.add(is.buffer)
-		pool.PutFloat64(is.buffer)
+		is.buffer.Free(pool)
 		if f.sum() {
 			output <- f.buffer
 		}
