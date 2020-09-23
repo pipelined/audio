@@ -13,11 +13,11 @@ import (
 // default.
 type Asset struct {
 	signal.Signal
-	sampleRate signal.SampleRate
+	sampleRate signal.Frequency
 }
 
 // SampleRate returns a sample rate of the asset.
-func (a *Asset) SampleRate() signal.SampleRate {
+func (a *Asset) SampleRate() signal.Frequency {
 	return a.sampleRate
 }
 

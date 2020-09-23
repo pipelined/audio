@@ -3,6 +3,7 @@ package audio
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 
@@ -26,7 +27,7 @@ var (
 // source.
 type Mixer struct {
 	once       sync.Once
-	sampleRate signal.SampleRate
+	sampleRate signal.Frequency
 	channels   int
 	input      chan inputSignal
 	head       *frame
@@ -40,7 +41,7 @@ type inputSignal struct {
 	buffer signal.Floating
 }
 
-func (m *Mixer) init(sampleRate signal.SampleRate, channels int) func() {
+func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 	return func() {
 		m.channels = channels
 		m.sampleRate = sampleRate
@@ -85,6 +86,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 }
 
 func mixer(pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
+	defer fmt.Println("mixer routine done")
 	defer close(output)
 	inputs := len(frames)
 	for inputs > 0 {
@@ -151,6 +153,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 				return nil
 			},
 			FlushFunc: func(ctx context.Context) error {
+				fmt.Println("mixer sink flushed")
 				select {
 				case m.input <- inputSignal{input: input}:
 				case <-ctx.Done():

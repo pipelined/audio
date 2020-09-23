@@ -24,7 +24,7 @@ func TestSource(t *testing.T) {
 	uints := alloc.Uint64(signal.MaxBitDepth)
 	signal.WriteStripedUint64([][]uint64{{0, math.MaxInt64 + 1, math.MaxUint64}}, uints)
 
-	sampleRate := signal.SampleRate(44100)
+	sampleRate := signal.Frequency(44100)
 	tests := []struct {
 		source   pipe.SourceAllocatorFunc
 		expected []float64

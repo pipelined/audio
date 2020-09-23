@@ -15,7 +15,7 @@ import (
 type Repeater struct {
 	mutability.Mutability
 	bufferSize int
-	sampleRate signal.SampleRate
+	sampleRate signal.Frequency
 	channels   int
 	sources    []chan message
 }
