@@ -13,11 +13,11 @@ import (
 // default.
 type Asset struct {
 	signal.Signal
-	sampleRate signal.SampleRate
+	sampleRate signal.Frequency
 }
 
 // SampleRate returns a sample rate of the asset.
-func (a *Asset) SampleRate() signal.SampleRate {
+func (a *Asset) SampleRate() signal.Frequency {
 	return a.sampleRate
 }
 
@@ -40,7 +40,7 @@ func (a *Asset) sinkFloating() pipe.SinkAllocatorFunc {
 		data := floatingAsset(a.Signal, props.Channels, bufferSize)
 		return pipe.Sink{
 			SinkFunc: func(in signal.Floating) error {
-				data = data.Append(in)
+				data.Append(in)
 				return nil
 			},
 			FlushFunc: func(context.Context) error {
@@ -75,7 +75,7 @@ func (a *Asset) sinkSigned() pipe.SinkAllocatorFunc {
 		pos := 0
 		return pipe.Sink{
 			SinkFunc: func(in signal.Floating) error {
-				data = data.Append(inc)
+				data.Append(inc)
 				pos += signal.FloatingAsSigned(in, data.Slice(pos, pos+bufferSize))
 				return nil
 			},
@@ -100,7 +100,7 @@ func (a *Asset) sinkUnsigned() pipe.SinkAllocatorFunc {
 		pos := 0
 		return pipe.Sink{
 			SinkFunc: func(in signal.Floating) error {
-				data = data.Append(inc)
+				data.Append(inc)
 				pos += signal.FloatingAsUnsigned(in, data.Slice(pos, pos+bufferSize))
 				return nil
 			},

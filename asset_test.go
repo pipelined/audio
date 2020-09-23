@@ -11,7 +11,7 @@ import (
 )
 
 func TestAssetSink(t *testing.T) {
-	sampleRate := signal.SampleRate(44100)
+	sampleRate := signal.Frequency(44100)
 	tests := []struct {
 		source      pipe.SourceAllocatorFunc
 		asset       *audio.Asset

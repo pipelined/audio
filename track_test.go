@@ -21,7 +21,7 @@ func TestTrack(t *testing.T) {
 	signal.WriteFloat64([]float64{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, sample1)
 	sample2 := alloc.Float64()
 	signal.WriteFloat64([]float64{20, 21, 22, 23, 24, 25, 26, 27, 28, 29}, sample2)
-	sampleRate := signal.SampleRate(44100)
+	sampleRate := signal.Frequency(44100)
 
 	type clip struct {
 		position int

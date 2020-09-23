@@ -36,7 +36,7 @@ func (l *link) End() int {
 }
 
 // Source implements track source with a sequence of not overlapped clips.
-func (t *Track) Source(sampleRate signal.SampleRate, start, end int) pipe.SourceAllocatorFunc {
+func (t *Track) Source(sampleRate signal.Frequency, start, end int) pipe.SourceAllocatorFunc {
 	if end == 0 {
 		end = t.endIndex()
 	}

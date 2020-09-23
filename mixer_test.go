@@ -107,7 +107,7 @@ func BenchmarkMixerLines(b *testing.B) {
 func run(numChannels, bufferSize, limit, numLines int) {
 	mixer := audio.Mixer{}
 
-	var lines []pipe.Line
+	var lines []*pipe.Line
 	valueMultiplier := 1.0 / float64(numLines)
 	for i := 0; i < numLines; i++ {
 		sourceAllocator := mock.Source{
