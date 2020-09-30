@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sync"
@@ -40,7 +41,7 @@ func (t *Track) Source(sampleRate signal.Frequency, start, end int) pipe.SourceA
 	if end == 0 {
 		end = t.endIndex()
 	}
-	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		return pipe.Source{
 				SourceFunc: trackSource(t.head.nextAfter(start), start, end),
 			},

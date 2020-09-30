@@ -2,7 +2,6 @@ package audio
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"sync/atomic"
 
@@ -27,7 +26,7 @@ type message struct {
 
 // Sink must be called once per repeater.
 func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
-	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(ctx context.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		r.sampleRate = props.SampleRate
 		r.channels = props.Channels
 		r.bufferSize = bufferSize
@@ -57,21 +56,17 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 }
 
 // AddOutput adds the line to the repeater. Will panic if repeater is immutable.
-func (r *Repeater) AddOutput(p *pipe.Pipe, route pipe.Routing) mutability.Mutation {
+func (r *Repeater) AddOutput(runner *pipe.Runner, l *pipe.Line) mutability.Mutation {
 	return r.Mutability.Mutate(func() error {
-		route.Source = r.Source()
-		line, err := route.Line(r.bufferSize)
-		if err != nil {
-			return fmt.Errorf("error binding route: %w", err)
-		}
-		p.Push(p.AddLine(line))
+		l.Source = r.Source()
+		runner.Push(runner.AddLine(l))
 		return nil
 	})
 }
 
 // Source must be called at least once per repeater.
 func (r *Repeater) Source() pipe.SourceAllocatorFunc {
-	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		source := make(chan message, 1)
 		r.sources = append(r.sources, source)
 		p := signal.GetPoolAllocator(r.channels, bufferSize, bufferSize)

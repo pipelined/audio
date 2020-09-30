@@ -50,13 +50,14 @@ func TestSource(t *testing.T) {
 	bufferSize := 2
 	for _, test := range tests {
 		sink := mock.Sink{}
-		l, _ := pipe.Routing{
-			Source: test.source,
-			Sink:   sink.Sink(),
-		}.Line(bufferSize)
 
-		p := pipe.New(context.Background(), pipe.WithLines(l))
-		_ = p.Wait()
+		p, _ := pipe.New(context.Background(), bufferSize,
+			&pipe.Line{
+				Source: test.source,
+				Sink:   sink.Sink(),
+			},
+		)
+		_ = p.Run().Wait()
 
 		result := make([]float64, sink.Values.Len())
 		signal.ReadFloat64(sink.Values, result)

@@ -58,7 +58,7 @@ func mustInitialized() {
 // signal. Only single source per mixer is allowed. Must be called after
 // Sink, otherwise will panic.
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
-	return func(bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
 		m.once.Do(mustInitialized) // check that source is bound after sink.
 		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
 		output := make(chan signal.Floating, 1)
@@ -127,7 +127,7 @@ func mixer(pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal
 // Sink provides mixer sink allocator. Mixer sink receives a signal for
 // mixing. Multiple sinks per mixer is allowed.
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
-	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(ctx context.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		m.once.Do(m.init(props.SampleRate, props.Channels))
 		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
@@ -153,7 +153,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 				return nil
 			},
 			FlushFunc: func(ctx context.Context) error {
-				fmt.Println("mixer sink flushed")
+				// fmt.Println("mixer sink flushed")
 				select {
 				case m.input <- inputSignal{input: input}:
 				case <-ctx.Done():

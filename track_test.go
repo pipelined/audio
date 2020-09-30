@@ -117,6 +117,7 @@ func TestTrack(t *testing.T) {
 		},
 	}
 
+	bufferSize := 2
 	for _, test := range tests {
 		track := audio.Track{}
 		for _, clip := range test.clips {
@@ -125,12 +126,13 @@ func TestTrack(t *testing.T) {
 
 		sink := &mock.Sink{}
 
-		l, _ := pipe.Routing{
-			Source: track.Source(sampleRate, 0, 0),
-			Sink:   sink.Sink(),
-		}.Line(2)
-
-		pipe.New(context.Background(), pipe.WithLines(l)).Wait()
+		p, _ := pipe.New(context.Background(), bufferSize,
+			&pipe.Line{
+				Source: track.Source(sampleRate, 0, 0),
+				Sink:   sink.Sink(),
+			},
+		)
+		_ = p.Run().Wait()
 
 		result := make([]float64, sink.Values.Len())
 		signal.ReadFloat64(sink.Values, result)
