@@ -66,9 +66,9 @@ func (r *Repeater) AddOutput(runner *pipe.Runner, l *pipe.Line) mutability.Mutat
 
 // Source must be called at least once per repeater.
 func (r *Repeater) Source() pipe.SourceAllocatorFunc {
+	source := make(chan message, 1)
+	r.sources = append(r.sources, source)
 	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
-		source := make(chan message, 1)
-		r.sources = append(r.sources, source)
 		p := signal.GetPoolAllocator(r.channels, bufferSize, bufferSize)
 		var (
 			message message
