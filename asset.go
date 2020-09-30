@@ -43,7 +43,7 @@ func (a *Asset) sinkFloating() pipe.SinkAllocatorFunc {
 				data.Append(in)
 				return nil
 			},
-			FlushFunc: func(context.Context) error {
+			FlushFunc: func() error {
 				a.Signal = data
 				return nil
 			},
@@ -79,7 +79,7 @@ func (a *Asset) sinkSigned() pipe.SinkAllocatorFunc {
 				pos += signal.FloatingAsSigned(in, data.Slice(pos, pos+bufferSize))
 				return nil
 			},
-			FlushFunc: func(context.Context) error {
+			FlushFunc: func() error {
 				a.Signal = data
 				return nil
 			},
@@ -104,7 +104,7 @@ func (a *Asset) sinkUnsigned() pipe.SinkAllocatorFunc {
 				pos += signal.FloatingAsUnsigned(in, data.Slice(pos, pos+bufferSize))
 				return nil
 			},
-			FlushFunc: func(context.Context) error {
+			FlushFunc: func() error {
 				a.Signal = data
 				return nil
 			},

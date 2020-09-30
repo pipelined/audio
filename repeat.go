@@ -44,7 +44,7 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 				}
 				return nil
 			},
-			FlushFunc: func(context.Context) error {
+			FlushFunc: func() error {
 				for i := range r.sources {
 					close(r.sources[i])
 				}

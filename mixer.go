@@ -3,7 +3,6 @@ package audio
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
 
@@ -18,9 +17,6 @@ var (
 	// ErrDifferentChannels is returned when signals with different number
 	// of channels are sinked into mixer.
 	ErrDifferentChannels = errors.New("sinking different channels")
-	// ErrSinkFlushTimeout is returned when sink flush exceeds the context
-	// timeout.
-	ErrSinkFlushTimeout = errors.New("sink flush timeout")
 )
 
 // Mixer summs up multiple signals. It has multiple sinks and a single
@@ -62,7 +58,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 		m.once.Do(mustInitialized) // check that source is bound after sink.
 		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
 		output := make(chan signal.Floating, 1)
-		go mixer(m.pool, m.frames, m.input, output)
+		go mixer(ctx, m.pool, m.frames, m.input, output)
 
 		// this is needed to enable garbage collection
 		m.frames = nil
@@ -75,7 +71,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 					}
 					return 0, io.EOF
 				},
-				FlushFunc: func(context.Context) error {
+				FlushFunc: func() error {
 					return nil
 				},
 			}, pipe.SignalProperties{
@@ -85,12 +81,16 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	}
 }
 
-func mixer(pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
-	defer fmt.Println("mixer routine done")
+func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
 	defer close(output)
 	inputs := len(frames)
 	for inputs > 0 {
-		is := <-input
+		var is inputSignal
+		select {
+		case is = <-input:
+		case <-ctx.Done():
+			return
+		}
 		f := frames[is.input]
 
 		// flush the signal
@@ -100,7 +100,11 @@ func mixer(pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal
 			for current := f; current != nil; current = current.next {
 				current.flushed++
 				if current.sum() {
-					output <- current.buffer
+					select {
+					case output <- current.buffer:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 			continue
@@ -112,7 +116,11 @@ func mixer(pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal
 		f.add(is.buffer)
 		is.buffer.Free(pool)
 		if f.sum() {
-			output <- f.buffer
+			select {
+			case output <- f.buffer:
+			case <-ctx.Done():
+				return
+			}
 		}
 		if f.next == nil {
 			// flushed sinks are not expected anymore
@@ -141,23 +149,24 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 		return pipe.Sink{
 			SinkFunc: func(floats signal.Floating) error {
 				// sink new buffer
-				inputBuffer := m.pool.GetFloat64()
-				copied := signal.FloatingAsFloating(floats, inputBuffer)
-				if copied != inputBuffer.Length() {
-					inputBuffer = inputBuffer.Slice(0, copied)
+				buf := m.pool.GetFloat64()
+				copied := signal.FloatingAsFloating(floats, buf)
+				if copied != buf.Length() {
+					buf = buf.Slice(0, copied)
 				}
-				m.input <- inputSignal{
-					input:  input,
-					buffer: inputBuffer,
+				select {
+				case m.input <- inputSignal{input: input, buffer: buf}:
+				case <-ctx.Done():
+					return nil
 				}
+
 				return nil
 			},
-			FlushFunc: func(ctx context.Context) error {
-				// fmt.Println("mixer sink flushed")
+			FlushFunc: func() error {
 				select {
 				case m.input <- inputSignal{input: input}:
 				case <-ctx.Done():
-					return ErrSinkFlushTimeout
+					return nil
 				}
 				return nil
 			},
