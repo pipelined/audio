@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/mutable"
 	"pipelined.dev/signal"
 )
 
@@ -22,10 +23,12 @@ var (
 // Mixer summs up multiple signals. It has multiple sinks and a single
 // source.
 type Mixer struct {
+	ctx        context.Context
 	once       sync.Once
 	sampleRate signal.Frequency
 	channels   int
 	input      chan inputSignal
+	output     chan signal.Floating
 	head       *frame
 
 	pool   *signal.PoolAllocator
@@ -54,30 +57,30 @@ func mustInitialized() {
 // signal. Only single source per mixer is allowed. Must be called after
 // Sink, otherwise will panic.
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
-	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		m.once.Do(mustInitialized) // check that source is bound after sink.
 		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
-		output := make(chan signal.Floating, 1)
-		go mixer(ctx, m.pool, m.frames, m.input, output)
-
-		// this is needed to enable garbage collection
-		m.frames = nil
-		m.head = nil
 		return pipe.Source{
-				SourceFunc: func(out signal.Floating) (int, error) {
-					if sum, ok := <-output; ok {
-						defer sum.Free(m.pool)
-						return signal.FloatingAsFloating(sum, out), nil
-					}
-					return 0, io.EOF
-				},
-				FlushFunc: func() error {
-					return nil
-				},
-			}, pipe.SignalProperties{
+			Output: pipe.SignalProperties{
 				Channels:   m.channels,
 				SampleRate: m.sampleRate,
-			}, nil
+			},
+			StartFunc: func(ctx context.Context) error {
+				m.output = make(chan signal.Floating, 1)
+				go mixer(ctx, m.pool, m.frames, m.input, m.output)
+				// this is needed to enable garbage collection
+				m.frames = nil
+				m.head = nil
+				return nil
+			},
+			SourceFunc: func(out signal.Floating) (int, error) {
+				if sum, ok := <-m.output; ok {
+					defer sum.Free(m.pool)
+					return signal.FloatingAsFloating(sum, out), nil
+				}
+				return 0, io.EOF
+			},
+		}, nil
 	}
 }
 
@@ -135,7 +138,7 @@ func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []*frame, inp
 // Sink provides mixer sink allocator. Mixer sink receives a signal for
 // mixing. Multiple sinks per mixer is allowed.
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
-	return func(ctx context.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(mut mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		m.once.Do(m.init(props.SampleRate, props.Channels))
 		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
@@ -147,6 +150,10 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 		m.frames = append(m.frames, m.head)
 		m.head.expected++
 		return pipe.Sink{
+			StartFunc: func(ctx context.Context) error {
+				m.ctx = ctx
+				return nil
+			},
 			SinkFunc: func(floats signal.Floating) error {
 				// sink new buffer
 				buf := m.pool.GetFloat64()
@@ -156,13 +163,13 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 				}
 				select {
 				case m.input <- inputSignal{input: input, buffer: buf}:
-				case <-ctx.Done():
+				case <-m.ctx.Done():
 					return nil
 				}
 
 				return nil
 			},
-			FlushFunc: func() error {
+			FlushFunc: func(ctx context.Context) error {
 				select {
 				case m.input <- inputSignal{input: input}:
 				case <-ctx.Done():

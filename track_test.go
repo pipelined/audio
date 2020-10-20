@@ -126,13 +126,13 @@ func TestTrack(t *testing.T) {
 
 		sink := &mock.Sink{}
 
-		p, _ := pipe.New(context.Background(), bufferSize,
-			&pipe.Line{
+		p, _ := pipe.New(bufferSize,
+			pipe.Routing{
 				Source: track.Source(sampleRate, 0, 0),
 				Sink:   sink.Sink(),
 			},
 		)
-		_ = p.Run().Wait()
+		_ = p.Async(context.Background()).Await()
 
 		result := make([]float64, sink.Values.Len())
 		signal.ReadFloat64(sink.Values, result)

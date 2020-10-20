@@ -3,16 +3,18 @@ package audio
 import (
 	"context"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"pipelined.dev/pipe"
-	"pipelined.dev/pipe/mutability"
+	"pipelined.dev/pipe/mutable"
 	"pipelined.dev/signal"
 )
 
 // Repeater sinks the signal and sources it to multiple pipelines.
 type Repeater struct {
-	mutability.Mutability
+	m          sync.Mutex
+	mut        mutable.Context
 	bufferSize int
 	sampleRate signal.Frequency
 	channels   int
@@ -26,14 +28,15 @@ type message struct {
 
 // Sink must be called once per repeater.
 func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
-	return func(ctx context.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(mut mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		r.sampleRate = props.SampleRate
 		r.channels = props.Channels
 		r.bufferSize = bufferSize
 		p := signal.GetPoolAllocator(props.Channels, bufferSize, bufferSize)
 		return pipe.Sink{
-			Mutability: r.Mutability,
 			SinkFunc: func(in signal.Floating) error {
+				r.m.Lock()
+				defer r.m.Unlock()
 				for _, source := range r.sources {
 					out := p.GetFloat64()
 					signal.FloatingAsFloating(in, out)
@@ -44,7 +47,9 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 				}
 				return nil
 			},
-			FlushFunc: func() error {
+			FlushFunc: func(ctx context.Context) error {
+				r.m.Lock()
+				defer r.m.Unlock()
 				for i := range r.sources {
 					close(r.sources[i])
 				}
@@ -55,20 +60,13 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 	}
 }
 
-// AddOutput adds the line to the repeater. Will panic if repeater is immutable.
-func (r *Repeater) AddOutput(runner *pipe.Runner, l *pipe.Line) mutability.Mutation {
-	return r.Mutability.Mutate(func() error {
-		l.Source = r.Source()
-		runner.Push(runner.AddLine(l))
-		return nil
-	})
-}
-
 // Source must be called at least once per repeater.
 func (r *Repeater) Source() pipe.SourceAllocatorFunc {
+	r.m.Lock()
+	defer r.m.Unlock()
 	source := make(chan message, 1)
 	r.sources = append(r.sources, source)
-	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		p := signal.GetPoolAllocator(r.channels, bufferSize, bufferSize)
 		var (
 			message message
@@ -86,10 +84,10 @@ func (r *Repeater) Source() pipe.SourceAllocatorFunc {
 					}
 					return read, nil
 				},
-			},
-			pipe.SignalProperties{
-				SampleRate: r.sampleRate,
-				Channels:   r.channels,
+				Output: pipe.SignalProperties{
+					SampleRate: r.sampleRate,
+					Channels:   r.channels,
+				},
 			},
 			nil
 	}

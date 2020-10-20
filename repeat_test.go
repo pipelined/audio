@@ -7,7 +7,6 @@ import (
 	"pipelined.dev/audio"
 	"pipelined.dev/pipe"
 	"pipelined.dev/pipe/mock"
-	"pipelined.dev/pipe/mutability"
 )
 
 const bufferSize = 512
@@ -22,17 +21,17 @@ func TestPipe(t *testing.T) {
 	repeater := &audio.Repeater{}
 	sink1 := &mock.Sink{Discard: true}
 	sink2 := &mock.Sink{Discard: true}
-	p, err := pipe.New(context.Background(), bufferSize,
-		&pipe.Line{
+	p, err := pipe.New(bufferSize,
+		pipe.Routing{
 			Source:     source.Source(),
 			Processors: pipe.Processors(proc1.Processor(), proc2.Processor()),
 			Sink:       repeater.Sink(),
 		},
-		&pipe.Line{
+		pipe.Routing{
 			Source: repeater.Source(),
 			Sink:   sink1.Sink(),
 		},
-		&pipe.Line{
+		pipe.Routing{
 			Source: repeater.Source(),
 			Sink:   sink2.Sink(),
 		},
@@ -40,7 +39,7 @@ func TestPipe(t *testing.T) {
 	assertNil(t, "error", err)
 
 	// start
-	err = p.Run().Wait()
+	err = p.Async(context.Background()).Await()
 	assertNil(t, "error", err)
 
 	assertEqual(t, "messages", source.Counter.Messages, 862)
@@ -48,35 +47,34 @@ func TestPipe(t *testing.T) {
 }
 
 func TestRepeaterAddOutput(t *testing.T) {
-	repeater := &audio.Repeater{
-		Mutability: mutability.Mutable(),
-	}
+	repeater := &audio.Repeater{}
 	sink1 := &mock.Sink{}
 
 	p, _ := pipe.New(
-		context.Background(),
 		bufferSize,
-		&pipe.Line{
+		pipe.Routing{
 			Source: (&mock.Source{
 				Limit:    10 * bufferSize,
 				Channels: 2,
 			}).Source(),
 			Sink: repeater.Sink(),
 		},
-		&pipe.Line{
+		pipe.Routing{
 			Source: repeater.Source(),
 			Sink:   sink1.Sink(),
 		},
 	)
-	r := p.Run()
+	r := p.Async(context.Background())
 
 	sink2 := &mock.Sink{}
-	r.Push(repeater.AddOutput(r, &pipe.Line{
-		Sink: sink2.Sink(),
-	}))
-
+	l, err := p.AddLine(pipe.Routing{
+		Source: repeater.Source(),
+		Sink:   sink2.Sink(),
+	})
+	assertNil(t, "err", err)
+	<-r.StartLine(l)
 	// start
-	_ = r.Wait()
+	_ = r.Await()
 	assertEqual(t, "sink1 messages", sink1.Counter.Messages, 10)
 	assertEqual(t, "sink1 samples", sink1.Counter.Samples, 10*bufferSize)
 	assertEqual(t, "sink2 messages", sink2.Counter.Messages > 0, true)
@@ -87,31 +85,27 @@ func TestRepeaterAddOutput(t *testing.T) {
 // 1 Source is repeated to 2 Sinks
 func BenchmarkRepeat(b *testing.B) {
 	source := &mock.Source{
-		Mutator: mock.Mutator{
-			Mutability: mutability.Mutable(),
-		},
 		Limit:    862 * bufferSize,
 		Channels: 2,
 	}
 	repeater := audio.Repeater{}
+	p, _ := pipe.New(
+		bufferSize,
+		pipe.Routing{
+			Source: source.Source(),
+			Sink:   repeater.Sink(),
+		},
+		pipe.Routing{
+			Source: repeater.Source(),
+			Sink:   (&mock.Sink{Discard: true}).Sink(),
+		},
+		pipe.Routing{
+			Source: repeater.Source(),
+			Sink:   (&mock.Sink{Discard: true}).Sink(),
+		},
+	)
 	for i := 0; i < b.N; i++ {
-		p, _ := pipe.New(
-			context.Background(),
-			bufferSize,
-			&pipe.Line{
-				Source: source.Source(),
-				Sink:   repeater.Sink(),
-			},
-			&pipe.Line{
-				Source: repeater.Source(),
-				Sink:   (&mock.Sink{Discard: true}).Sink(),
-			},
-			&pipe.Line{
-				Source: repeater.Source(),
-				Sink:   (&mock.Sink{Discard: true}).Sink(),
-			},
-		)
-		_ = p.Run(source.Reset()).Wait()
+		_ = p.Async(context.Background(), source.Reset()).Await()
 	}
 }
 

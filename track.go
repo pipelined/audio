@@ -1,12 +1,12 @@
 package audio
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"sync"
 
 	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/mutable"
 	"pipelined.dev/signal"
 )
 
@@ -41,13 +41,13 @@ func (t *Track) Source(sampleRate signal.Frequency, start, end int) pipe.SourceA
 	if end == 0 {
 		end = t.endIndex()
 	}
-	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		return pipe.Source{
 				SourceFunc: trackSource(t.head.nextAfter(start), start, end),
-			},
-			pipe.SignalProperties{
-				Channels:   t.channels,
-				SampleRate: sampleRate,
+				Output: pipe.SignalProperties{
+					Channels:   t.channels,
+					SampleRate: sampleRate,
+				},
 			},
 			nil
 	}

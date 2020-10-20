@@ -1,22 +1,23 @@
 package audio
 
 import (
-	"context"
 	"io"
 
 	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/mutable"
 	"pipelined.dev/signal"
 )
 
 // Source implements signal source for any signal type.
 func Source(sr signal.Frequency, s signal.Signal) pipe.SourceAllocatorFunc {
-	return func(ctx context.Context, bufferSize int) (pipe.Source, pipe.SignalProperties, error) {
+	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		return pipe.Source{
-				SourceFunc: signalSource(s),
-			}, pipe.SignalProperties{
+			SourceFunc: signalSource(s),
+			Output: pipe.SignalProperties{
 				Channels:   s.Channels(),
 				SampleRate: sr,
-			}, nil
+			},
+		}, nil
 	}
 }
 
