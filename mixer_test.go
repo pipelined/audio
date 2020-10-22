@@ -52,7 +52,6 @@ func TestMixer(t *testing.T) {
 	}
 
 	const (
-		// sampleRate  = signal.SampleRate(44100)
 		numChannels = 1
 		bufferSize  = 2
 	)
@@ -61,14 +60,13 @@ func TestMixer(t *testing.T) {
 
 		routes := make([]pipe.Routing, 0, len(test.generators)+1)
 		for _, gen := range test.generators {
-			sourceAllocator := mock.Source{
-				Channels: numChannels,
-				Limit:    gen.messages,
-				Value:    gen.value,
-			}
 			routes = append(routes, pipe.Routing{
-				Source: sourceAllocator.Source(),
-				Sink:   mixer.Sink(),
+				Source: (&mock.Source{
+					Channels: numChannels,
+					Limit:    gen.messages,
+					Value:    gen.value,
+				}).Source(),
+				Sink: mixer.Sink(),
 			})
 		}
 		sink := mock.Sink{}
@@ -76,10 +74,11 @@ func TestMixer(t *testing.T) {
 			Source: mixer.Source(),
 			Sink:   sink.Sink(),
 		})
-		lines, err := pipe.Lines(bufferSize, routes...)
+
+		p, err := pipe.New(bufferSize, routes...)
 		assertEqual(t, "error", err, nil)
 
-		err = pipe.New(context.Background(), pipe.WithLines(lines...)).Wait()
+		err = p.Async(context.Background()).Await()
 		assertEqual(t, "error", err, nil)
 
 		result := make([]float64, sink.Values.Len())
@@ -105,30 +104,30 @@ func BenchmarkMixerLines(b *testing.B) {
 }
 
 func run(numChannels, bufferSize, limit, numLines int) {
-	mixer := audio.Mixer{}
-
-	var lines []*pipe.Line
+	var (
+		lines []pipe.Routing
+		mixer audio.Mixer
+	)
 	valueMultiplier := 1.0 / float64(numLines)
 	for i := 0; i < numLines; i++ {
-		sourceAllocator := mock.Source{
-			Channels: numChannels,
-			Limit:    limit,
-			Value:    float64(i) * valueMultiplier,
-		}
-		line, _ := pipe.Routing{
-			Source: sourceAllocator.Source(),
-			Sink:   mixer.Sink(),
-		}.Line(bufferSize)
-		lines = append(lines, line)
+		lines = append(lines,
+			pipe.Routing{
+				Source: (&mock.Source{
+					Channels: numChannels,
+					Limit:    limit,
+					Value:    float64(i) * valueMultiplier,
+				}).Source(),
+				Sink: mixer.Sink(),
+			},
+		)
 	}
-	sink := mock.Sink{
-		Discard: true,
-	}
-	line, _ := pipe.Routing{
+	lines = append(lines, pipe.Routing{
 		Source: mixer.Source(),
-		Sink:   sink.Sink(),
-	}.Line(bufferSize)
-	lines = append(lines, line)
+		Sink: (&mock.Sink{
+			Discard: true,
+		}).Sink(),
+	})
 
-	pipe.New(context.Background(), pipe.WithLines(lines...)).Wait()
+	p, _ := pipe.New(bufferSize, lines...)
+	p.Async(context.Background()).Await()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"pipelined.dev/pipe"
+	"pipelined.dev/pipe/mutable"
 	"pipelined.dev/signal"
 )
 
@@ -35,7 +36,7 @@ func (a *Asset) Sink() (result pipe.SinkAllocatorFunc) {
 }
 
 func (a *Asset) sinkFloating() pipe.SinkAllocatorFunc {
-	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(m mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		a.sampleRate = props.SampleRate
 		data := floatingAsset(a.Signal, props.Channels, bufferSize)
 		return pipe.Sink{
@@ -63,7 +64,7 @@ func floatingAsset(s signal.Signal, channels, bufferSize int) signal.Floating {
 }
 
 func (a *Asset) sinkSigned() pipe.SinkAllocatorFunc {
-	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(m mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		a.sampleRate = props.SampleRate
 		data := a.Signal.(signal.Signed)
 		// increment buffer is used only to grow the capacity of the data slice
@@ -88,7 +89,7 @@ func (a *Asset) sinkSigned() pipe.SinkAllocatorFunc {
 }
 
 func (a *Asset) sinkUnsigned() pipe.SinkAllocatorFunc {
-	return func(bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
+	return func(m mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		a.sampleRate = props.SampleRate
 		data := a.Signal.(signal.Unsigned)
 		// increment buffer is used only to grow the capacity of the data slice
