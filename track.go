@@ -92,9 +92,6 @@ func trackSource(current *link, start, end int) pipe.SourceFunc {
 				sliceEnd = sliceStart + out.Length() - read
 			}
 			n := signal.AsFloating(signal.Slice(current.data, sliceStart, sliceEnd), out.Slice(read, out.Length()))
-			if n == 0 {
-				fmt.Printf("ZERO!")
-			}
 			read += n
 			pos += n
 			if pos >= current.End() {
