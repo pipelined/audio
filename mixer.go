@@ -23,7 +23,6 @@ var (
 // Mixer summs up multiple signals. It has multiple sinks and a single
 // source.
 type Mixer struct {
-	ctx        context.Context
 	once       sync.Once
 	sampleRate signal.Frequency
 	channels   int
@@ -149,9 +148,10 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 		input := len(m.frames)
 		m.frames = append(m.frames, m.head)
 		m.head.expected++
+		var startCtx context.Context
 		return pipe.Sink{
 			StartFunc: func(ctx context.Context) error {
-				m.ctx = ctx
+				startCtx = ctx
 				return nil
 			},
 			SinkFunc: func(floats signal.Floating) error {
@@ -163,7 +163,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 				}
 				select {
 				case m.input <- inputSignal{input: input, buffer: buf}:
-				case <-m.ctx.Done():
+				case <-startCtx.Done():
 					return nil
 				}
 
