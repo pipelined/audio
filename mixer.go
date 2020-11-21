@@ -23,28 +23,44 @@ var (
 // Mixer summs up multiple signals. It has multiple sinks and a single
 // source.
 type Mixer struct {
-	once       sync.Once
-	sampleRate signal.Frequency
-	channels   int
-	input      chan inputSignal
-	output     chan signal.Floating
-	head       *frame
+	once         sync.Once
+	sampleRate   signal.Frequency
+	channels     int
+	inputSignals chan inputSignal
+	output       chan signal.Floating
+	head         *frame
 
 	pool   *signal.PoolAllocator
-	frames []*frame
+	inputs []input
 }
 
-type inputSignal struct {
-	input  int
-	buffer signal.Floating
-}
+type (
+	// frame represents a slice of samples to mix.
+	frame struct {
+		next     *frame
+		buffer   signal.Floating
+		expected int
+		added    int
+		flushed  int
+		length   int // https://github.com/pipelined/mixer/issues/5
+	}
+
+	inputSignal struct {
+		input  int
+		buffer signal.Floating
+	}
+
+	input struct {
+		*frame
+	}
+)
 
 func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 	return func() {
 		m.channels = channels
 		m.sampleRate = sampleRate
 		m.head = &frame{}
-		m.input = make(chan inputSignal, 1)
+		m.inputSignals = make(chan inputSignal, 1)
 	}
 }
 
@@ -66,9 +82,9 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 			},
 			StartFunc: func(ctx context.Context) error {
 				m.output = make(chan signal.Floating, 1)
-				go mixer(ctx, m.pool, m.frames, m.input, m.output)
+				go mixer(ctx, m.pool, m.inputs, m.inputSignals, m.output)
 				// this is needed to enable garbage collection
-				m.frames = nil
+				m.inputs = nil
 				m.head = nil
 				return nil
 			},
@@ -83,7 +99,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	}
 }
 
-func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
+func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []input, input <-chan inputSignal, output chan<- signal.Floating) {
 	defer close(output)
 	inputs := len(frames)
 	for inputs > 0 {
@@ -97,9 +113,9 @@ func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []*frame, inp
 
 		// flush the signal
 		if is.buffer == nil {
-			frames[is.input] = nil
+			frames[is.input].frame = nil
 			inputs--
-			for current := f; current != nil; current = current.next {
+			for current := f; current.frame != nil; current.frame = current.frame.next {
 				current.flushed++
 				if current.sum() {
 					select {
@@ -130,7 +146,7 @@ func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []*frame, inp
 				expected: f.expected - f.flushed,
 			}
 		}
-		frames[is.input] = f.next
+		frames[is.input].frame = f.next
 	}
 }
 
@@ -145,8 +161,8 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 		if m.channels != props.Channels {
 			return pipe.Sink{}, ErrDifferentChannels
 		}
-		input := len(m.frames)
-		m.frames = append(m.frames, m.head)
+		m.inputs = append(m.inputs, input{frame: m.head})
+		input := len(m.inputs) - 1
 		m.head.expected++
 		var startCtx context.Context
 		return pipe.Sink{
@@ -162,7 +178,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 					buf = buf.Slice(0, copied)
 				}
 				select {
-				case m.input <- inputSignal{input: input, buffer: buf}:
+				case m.inputSignals <- inputSignal{input: input, buffer: buf}:
 				case <-startCtx.Done():
 					return nil
 				}
@@ -171,7 +187,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 			},
 			FlushFunc: func(ctx context.Context) error {
 				select {
-				case m.input <- inputSignal{input: input}:
+				case m.inputSignals <- inputSignal{input: input}:
 				case <-ctx.Done():
 					return nil
 				}
@@ -186,16 +202,6 @@ func min(n1, n2 int) int {
 		return n1
 	}
 	return n2
-}
-
-// frame represents a slice of samples to mix.
-type frame struct {
-	next     *frame
-	buffer   signal.Floating
-	expected int
-	added    int
-	flushed  int
-	length   int // https://github.com/pipelined/mixer/issues/5
 }
 
 // sum returns mixed samplein.
