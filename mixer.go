@@ -159,6 +159,7 @@ func mix(ctx context.Context, frames frames, pool *signal.PoolAllocator, inputs 
 		if input.frame == head {
 			frames[next].expected = frames[head].expected - frames[head].flushed
 			frames[next].flushed = 0
+			frames[next].length = 0
 			frames[next].buffer = pool.GetFloat64()
 			head = next
 		}
