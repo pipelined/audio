@@ -227,8 +227,9 @@ func (f *frame) sum() bool {
 	if f.added == 0 || f.added+f.flushed != f.expected {
 		return false
 	}
-	if f.buffer.Length() != f.length {
-		f.buffer = f.buffer.Slice(0, f.length)
+	if f.buffer.Len() != f.length {
+		// fmt.Printf("slice!")
+		f.buffer = f.buffer.Slice(0, f.length/f.buffer.Channels())
 	}
 	for i := 0; i < f.buffer.Len(); i++ {
 		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
@@ -242,8 +243,8 @@ func (f *frame) add(in signal.Floating) {
 	for i := 0; i < l; i++ {
 		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
 	}
-	if f.length < in.Length() {
-		f.length = in.Length()
+	if f.length < in.Len() {
+		f.length = in.Len()
 	}
 	return
 }
