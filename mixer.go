@@ -29,16 +29,23 @@ type Mixer struct {
 	channels     int
 	inputSignals chan inputSignal
 	output       chan signal.Floating
-	head         *frame
+	current      int
+	frames
 
 	pool   *signal.PoolAllocator
 	inputs []input
 }
 
+const (
+	flushed   = -1
+	numFrames = len(frames{})
+)
+
 type (
+	frames [2]frame
+
 	// frame represents a slice of samples to mix.
 	frame struct {
-		next     *frame
 		buffer   signal.Floating
 		expected int
 		added    int
@@ -52,8 +59,8 @@ type (
 	}
 
 	input struct {
-		*frame
-		sema semaphore.Semaphore
+		frame int
+		sema  semaphore.Semaphore
 	}
 )
 
@@ -61,7 +68,6 @@ func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 	return func() {
 		m.channels = channels
 		m.sampleRate = sampleRate
-		m.head = &frame{}
 		m.inputSignals = make(chan inputSignal, 1)
 	}
 }
@@ -84,10 +90,8 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 			},
 			StartFunc: func(ctx context.Context) error {
 				m.output = make(chan signal.Floating, 1)
-				go mixer(ctx, m.pool, m.inputs, m.inputSignals, m.output)
+				go mix(ctx, m.frames, m.pool, m.inputs, m.inputSignals, m.output)
 				// this is needed to enable garbage collection
-				m.inputs = nil
-				m.head = nil
 				return nil
 			},
 			SourceFunc: func(out signal.Floating) (int, error) {
@@ -101,9 +105,10 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	}
 }
 
-func mixer(ctx context.Context, pool *signal.PoolAllocator, inputs []input, inputSignals <-chan inputSignal, output chan<- signal.Floating) {
+func mix(ctx context.Context, frames frames, pool *signal.PoolAllocator, inputs []input, inputSignals <-chan inputSignal, output chan<- signal.Floating) {
 	defer close(output)
 	sinking := len(inputs)
+	head := 0
 	for sinking > 0 {
 		var is inputSignal
 		select {
@@ -111,49 +116,54 @@ func mixer(ctx context.Context, pool *signal.PoolAllocator, inputs []input, inpu
 		case <-ctx.Done():
 			return
 		}
-		input := inputs[is.input]
+		input := &inputs[is.input]
+		frame := &frames[input.frame]
 
 		// flush the signal
 		if is.buffer == nil {
-			inputs[is.input].frame = nil
 			sinking--
-			for current := input; current.frame != nil; current.frame = current.frame.next {
-				current.flushed++
-				if current.sum() {
+			for {
+				frame.flushed++
+				if frame.sum() {
 					select {
-					case output <- current.buffer:
+					case output <- frame.buffer:
+						frame.buffer = nil
 					case <-ctx.Done():
 						return
 					}
 				}
+				if input.frame == head {
+					input.frame = flushed
+					break
+				}
+				input.frame = frames.next(input.frame)
+				frame = &frames[input.frame]
 			}
 			continue
 		}
 
-		if input.buffer == nil {
-			input.buffer = pool.GetFloat64()
+		if frame.buffer == nil {
+			frame.buffer = pool.GetFloat64()
 		}
-		input.add(is.buffer)
+		frame.add(is.buffer)
 		is.buffer.Free(pool)
-		if input.sum() {
-			for i := 0; i < input.expected; i++ {
-				if input := inputs[i]; input.frame != nil {
-					input.sema.Release()
-				}
-			}
+		if frame.sum() {
+			frame.release(inputs)
 			select {
-			case output <- input.buffer:
+			case output <- frame.buffer:
+				frame.buffer = nil
 			case <-ctx.Done():
 				return
 			}
 		}
-		if input.next == nil {
-			// flushed sinks are not expected anymore
-			input.next = &frame{
-				expected: input.expected - input.flushed,
-			}
+		next := frames.next(input.frame)
+		// is this input first to proceed to the next frame
+		if input.frame == head {
+			frames[next].expected = frames[head].expected - frames[head].flushed
+			frames[next].flushed = 0
+			head = next
 		}
-		inputs[is.input].frame = input.next
+		input.frame = next
 	}
 }
 
@@ -168,13 +178,15 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 		if m.channels != props.Channels {
 			return pipe.Sink{}, ErrDifferentChannels
 		}
-		sema := semaphore.New(2)
-		m.inputs = append(m.inputs, input{
-			frame: m.head,
-			sema:  sema,
-		})
+		sema := semaphore.New(numFrames - 1)
+		m.inputs = append(m.inputs,
+			input{
+				frame: 0,
+				sema:  sema,
+			},
+		)
 		input := len(m.inputs) - 1
-		m.head.expected++
+		m.frames[0].expected++
 		var startCtx context.Context
 		return pipe.Sink{
 			StartFunc: func(ctx context.Context) error {
@@ -240,4 +252,23 @@ func (f *frame) add(in signal.Floating) {
 		f.length = in.Length()
 	}
 	return
+}
+
+func (f *frame) release(inputs []input) {
+	// f.expected = 0
+	f.added = 0
+	f.flushed = 0
+	for i := 0; i < f.expected; i++ {
+		if input := inputs[i]; input.frame != flushed {
+			input.sema.Release()
+		}
+	}
+}
+
+func (f frames) next(c int) int {
+	next := c + 1
+	if next == len(f) {
+		return 0
+	}
+	return next
 }
