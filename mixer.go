@@ -83,6 +83,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		m.once.Do(mustInitialized) // check that source is bound after sink.
 		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
+		m.frames[0].buffer = m.pool.GetFloat64()
 		return pipe.Source{
 			Output: pipe.SignalProperties{
 				Channels:   m.channels,
@@ -125,6 +126,7 @@ func mix(ctx context.Context, frames frames, pool *signal.PoolAllocator, inputs 
 			for {
 				frame.flushed++
 				if frame.sum() {
+					frame.release(inputs)
 					select {
 					case output <- frame.buffer:
 						frame.buffer = nil
@@ -142,11 +144,7 @@ func mix(ctx context.Context, frames frames, pool *signal.PoolAllocator, inputs 
 			continue
 		}
 
-		if frame.buffer == nil {
-			frame.buffer = pool.GetFloat64()
-		}
 		frame.add(is.buffer)
-		is.buffer.Free(pool)
 		if frame.sum() {
 			frame.release(inputs)
 			select {
@@ -161,6 +159,7 @@ func mix(ctx context.Context, frames frames, pool *signal.PoolAllocator, inputs 
 		if input.frame == head {
 			frames[next].expected = frames[head].expected - frames[head].flushed
 			frames[next].flushed = 0
+			frames[next].buffer = pool.GetFloat64()
 			head = next
 		}
 		input.frame = next
@@ -195,14 +194,9 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 			},
 			SinkFunc: func(floats signal.Floating) error {
 				// sink new buffer
-				sema.Acquire(startCtx)
-				buf := m.pool.GetFloat64()
-				copied := signal.FloatingAsFloating(floats, buf)
-				if copied != buf.Length() {
-					buf = buf.Slice(0, copied)
-				}
 				select {
-				case m.inputSignals <- inputSignal{input: input, buffer: buf}:
+				case m.inputSignals <- inputSignal{input: input, buffer: floats}:
+					sema.Acquire(startCtx)
 				case <-startCtx.Done():
 					return nil
 				}

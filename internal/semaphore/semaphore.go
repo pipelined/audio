@@ -10,9 +10,9 @@ type Semaphore struct {
 // New returns new initialized semaphore.
 func New(l int) Semaphore {
 	limit := make(chan struct{}, l)
-	for i := 0; i < l; i++ {
-		limit <- struct{}{}
-	}
+	// for i := 0; i < l; i++ {
+	// 	limit <- struct{}{}
+	// }
 	return Semaphore{
 		limit: limit,
 	}
