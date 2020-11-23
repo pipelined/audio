@@ -32,7 +32,6 @@ type Mixer struct {
 	current      int
 	frames
 
-	pool   *signal.PoolAllocator
 	inputs []input
 }
 
@@ -82,8 +81,8 @@ func mustInitialized() {
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		m.once.Do(mustInitialized) // check that source is bound after sink.
-		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
-		m.frames[0].buffer = m.pool.GetFloat64()
+		pool := signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
+		m.frames[0].buffer = pool.GetFloat64()
 		return pipe.Source{
 			Output: pipe.SignalProperties{
 				Channels:   m.channels,
@@ -91,13 +90,13 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 			},
 			StartFunc: func(ctx context.Context) error {
 				m.output = make(chan signal.Floating, 1)
-				go mix(ctx, m.frames, m.pool, m.inputs, m.inputSignals, m.output)
+				go mix(ctx, m.frames, pool, m.inputs, m.inputSignals, m.output)
 				// this is needed to enable garbage collection
 				return nil
 			},
 			SourceFunc: func(out signal.Floating) (int, error) {
 				if sum, ok := <-m.output; ok {
-					defer sum.Free(m.pool)
+					defer sum.Free(pool)
 					return signal.FloatingAsFloating(sum, out), nil
 				}
 				return 0, io.EOF
