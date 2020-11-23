@@ -18,11 +18,15 @@ func New(l int) Semaphore {
 	}
 }
 
-// Acquire the lock.
-func (s *Semaphore) Acquire(ctx context.Context) {
+// Acquire the lock. Calling this method blocks until lock is obtained or
+// context is expired. Returns true if lock is obtained, false if context
+// is done.
+func (s *Semaphore) Acquire(ctx context.Context) bool {
 	select {
 	case <-s.limit:
+		return true
 	case <-ctx.Done():
+		return false
 	}
 }
 
