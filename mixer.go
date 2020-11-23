@@ -24,7 +24,7 @@ var (
 // Mixer summs up multiple signals. It has multiple sinks and a single
 // source.
 type Mixer struct {
-	once         sync.Once
+	initialize   sync.Once
 	sampleRate   signal.Frequency
 	channels     int
 	inputSignals chan inputSignal
@@ -71,8 +71,8 @@ func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 	}
 }
 
-func mustInitialized() {
-	panic("mixer sink must be bound before source")
+func mustAfterSink() {
+	panic("mixer source bound before sink")
 }
 
 // Source provides mixer source allocator. Mixer source outputs mixed
@@ -80,7 +80,7 @@ func mustInitialized() {
 // Sink, otherwise will panic.
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
-		m.once.Do(mustInitialized) // check that source is bound after sink.
+		m.initialize.Do(mustAfterSink) // check that source is bound after sink.
 		pool := signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
 		m.frames[0].buffer = pool.GetFloat64()
 		return pipe.Source{
@@ -170,7 +170,7 @@ func mix(ctx context.Context, frames frames, pool *signal.PoolAllocator, inputs 
 // mixing. Multiple sinks per mixer is allowed.
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
-		m.once.Do(m.init(props.SampleRate, props.Channels))
+		m.initialize.Do(m.init(props.SampleRate, props.Channels))
 		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
 		}
