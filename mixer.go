@@ -20,9 +20,15 @@ var (
 	ErrDifferentChannels = errors.New("sinking different channels")
 )
 
+// this a buffer size for input channel. since we only mix single frame at
+// the time, it's just to prevent from blocking on select for too long.
+const defaultInputBuffer = 2
+
 // Mixer summs up multiple signals. It has multiple sinks and a single
-// source.
+// source. Recommended size for input buffer is expected number of sinks
+// the mixer will have. Default value is two.
 type Mixer struct {
+	InputBuffer  int
 	initialize   sync.Once
 	sampleRate   signal.Frequency
 	channels     int
@@ -65,7 +71,10 @@ func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 		m.cond.L = &m.mut
 		m.channels = channels
 		m.sampleRate = sampleRate
-		m.inputSignals = make(chan signal.Floating, 1)
+		if m.InputBuffer == 0 {
+			m.InputBuffer = defaultInputBuffer
+		}
+		m.inputSignals = make(chan signal.Floating, m.InputBuffer)
 	}
 }
 
@@ -176,13 +185,6 @@ func (m *Mixer) source(ctx context.Context, out signal.Floating) (int, bool) {
 			return signal.FloatingAsFloating(m.mix.buffer, out), true
 		}
 	}
-}
-
-func min(n1, n2 int) int {
-	if n1 < n2 {
-		return n1
-	}
-	return n2
 }
 
 // sum returns mixed samplein.
