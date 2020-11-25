@@ -28,14 +28,14 @@ const defaultInputBuffer = 2
 // source. Recommended size for input buffer is expected number of sinks
 // the mixer will have. Default value is two.
 type Mixer struct {
-	InputBuffer  int
-	initialize   sync.Once
-	sampleRate   signal.Frequency
-	channels     int
-	inputSignals chan signal.Floating
-	mix          frame
-	cond         sync.Cond
-	mut          inversedRWMutex
+	InputBuffer int
+	initialize  sync.Once
+	sampleRate  signal.Frequency
+	channels    int
+	input       chan signal.Floating
+	mut         inversedRWMutex
+	cond        sync.Cond
+	mix         frame
 }
 
 type (
@@ -76,7 +76,7 @@ func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 		if m.InputBuffer == 0 {
 			m.InputBuffer = defaultInputBuffer
 		}
-		m.inputSignals = make(chan signal.Floating, m.InputBuffer)
+		m.input = make(chan signal.Floating, m.InputBuffer)
 	}
 }
 
@@ -106,7 +106,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 				// sink new buffer
 				m.mut.Lock()
 				select {
-				case m.inputSignals <- floats:
+				case m.input <- floats:
 					m.cond.Wait()
 					m.mut.Unlock()
 					return nil
@@ -117,7 +117,7 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 			},
 			FlushFunc: func(ctx context.Context) error {
 				select {
-				case m.inputSignals <- nil:
+				case m.input <- nil:
 				case <-ctx.Done():
 					return nil
 				}
@@ -173,7 +173,7 @@ func (m *Mixer) source(ctx context.Context, out signal.Floating) (int, bool) {
 			return 0, false
 		}
 		select {
-		case in = <-m.inputSignals:
+		case in = <-m.input:
 		case <-ctx.Done():
 			return 0, false
 		}
