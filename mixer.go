@@ -20,8 +20,8 @@ var (
 	ErrDifferentChannels = errors.New("sinking different channels")
 )
 
-// this a buffer size for input channel. since we only mix single frame at
-// the time, it's just to prevent from blocking on select for too long.
+// buffer size for input channel. since we only mix single frame at the
+// time, it's just to prevent from blocking on select for too long.
 const defaultInputBuffer = 2
 
 // Mixer summs up multiple signals. It has multiple sinks and a single
@@ -46,6 +46,8 @@ type (
 		added    int
 	}
 
+	// inversed RW mutex, i.e. defaul Lock/Unlock methods are read-level
+	// and new methods Wlock/Wunlock are write-level.
 	inversedRWMutex sync.RWMutex
 )
 
