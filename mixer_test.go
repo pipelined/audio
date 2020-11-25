@@ -2,6 +2,7 @@ package audio_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"pipelined.dev/audio"
@@ -13,78 +14,88 @@ import (
 
 func TestMixer(t *testing.T) {
 	type generator struct {
-		messages int
-		value    float64
+		limit int
+		value float64
 	}
-	tests := []struct {
-		description string
-		generators  []generator
-		expected    []float64
-	}{
-		{
-			description: "1st run",
-			generators: []generator{
-				{
-					messages: 8,
-					value:    0.7,
-				},
-				{
-					messages: 6,
-					value:    0.5,
-				},
-			},
-			expected: []float64{0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.7, 0.7},
-		},
-		{
-			description: "2nd run",
-			generators: []generator{
-				{
-					messages: 5,
-					value:    0.5,
-				},
-				{
-					messages: 4,
-					value:    0.7,
-				},
-			},
-			expected: []float64{0.6, 0.6, 0.6, 0.6, 0.5},
-		},
-	}
-
 	const (
 		numChannels = 1
 		bufferSize  = 2
 	)
-	for _, test := range tests {
-		mixer := audio.Mixer{}
+	mixer := func(generators []generator, expected []float64) func(*testing.T) {
+		return func(t *testing.T) {
+			t.Helper()
+			mixer := audio.Mixer{}
 
-		routes := make([]pipe.Routing, 0, len(test.generators)+1)
-		for _, gen := range test.generators {
+			routes := make([]pipe.Routing, 0, len(generators)+1)
+			for _, gen := range generators {
+				routes = append(routes, pipe.Routing{
+					Source: (&mock.Source{
+						Channels: numChannels,
+						Limit:    gen.limit,
+						Value:    gen.value,
+					}).Source(),
+					Sink: mixer.Sink(),
+				})
+			}
+			sink := mock.Sink{}
 			routes = append(routes, pipe.Routing{
-				Source: (&mock.Source{
-					Channels: numChannels,
-					Limit:    gen.messages,
-					Value:    gen.value,
-				}).Source(),
-				Sink: mixer.Sink(),
+				Source: mixer.Source(),
+				Sink:   sink.Sink(),
 			})
+
+			p, err := pipe.New(bufferSize, routes...)
+			assertEqual(t, "error", err, nil)
+
+			err = p.Async(context.Background()).Await()
+			assertEqual(t, "error", err, nil)
+
+			result := make([]float64, sink.Values.Len())
+			signal.ReadFloat64(sink.Values, result)
+			assertEqual(t, "result", result, expected)
+			assertEqual(t, "messages", int(math.Ceil(float64(len(result))/float64(bufferSize)))+1, sink.Messages)
 		}
-		sink := mock.Sink{}
-		routes = append(routes, pipe.Routing{
-			Source: mixer.Source(),
-			Sink:   sink.Sink(),
-		})
-
-		p, err := pipe.New(bufferSize, routes...)
-		assertEqual(t, "error", err, nil)
-
-		err = p.Async(context.Background()).Await()
-		assertEqual(t, "error", err, nil)
-
-		result := make([]float64, sink.Values.Len())
-		signal.ReadFloat64(sink.Values, result)
-		assertEqual(t, "result", result, test.expected)
 	}
+	t.Run("single channel",
+		mixer(
+			[]generator{
+				{
+					limit: 4,
+					value: 0.7,
+				},
+			},
+			[]float64{0.7, 0.7, 0.7, 0.7},
+		),
+	)
+	t.Run("two channels same length",
+		mixer(
+			[]generator{
+				{
+					limit: 6,
+					value: 0.7,
+				},
+				{
+					limit: 6,
+					value: 0.5,
+				},
+			},
+			[]float64{0.6, 0.6, 0.6, 0.6, 0.6, 0.6},
+		),
+	)
+	t.Run("two channels short buffer",
+		mixer(
+			[]generator{
+				{
+					limit: 5,
+					value: 0.5,
+				},
+				{
+					limit: 4,
+					value: 0.7,
+				},
+			},
+			[]float64{0.6, 0.6, 0.6, 0.6, 0.5},
+		),
+	)
 }
 
 func Test100Lines(t *testing.T) {

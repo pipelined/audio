@@ -20,134 +20,82 @@ var (
 	ErrDifferentChannels = errors.New("sinking different channels")
 )
 
-// Mixer summs up multiple signals. It has multiple sinks and a single
-// source.
-type Mixer struct {
-	once       sync.Once
-	sampleRate signal.Frequency
-	channels   int
-	input      chan inputSignal
-	output     chan signal.Floating
-	head       *frame
+// buffer size for input channel. since we only mix single frame at the
+// time, it's just to prevent from blocking on select for too long.
+const defaultInputBuffer = 2
 
-	pool   *signal.PoolAllocator
-	frames []*frame
+// Mixer summs up multiple signals. It has multiple sinks and a single
+// source. Recommended size for input buffer is expected number of sinks
+// the mixer will have. Default value is two.
+type Mixer struct {
+	InputBuffer int
+	initialize  sync.Once
+	sampleRate  signal.Frequency
+	channels    int
+	input       chan signal.Floating
+	mut         inversedRWMutex
+	cond        sync.Cond
+	mix         frame
 }
 
-type inputSignal struct {
-	input  int
-	buffer signal.Floating
+type (
+	// frame represents a slice of samples to mix.
+	frame struct {
+		buffer   signal.Floating
+		expected int
+		added    int
+	}
+
+	// inversed RW mutex, i.e. defaul Lock/Unlock methods are read-level
+	// and new methods Wlock/Wunlock are write-level.
+	inversedRWMutex sync.RWMutex
+)
+
+func (m *inversedRWMutex) Lock() {
+	(*sync.RWMutex)(m).RLock()
+}
+
+func (m *inversedRWMutex) Unlock() {
+	(*sync.RWMutex)(m).RUnlock()
+}
+
+func (m *inversedRWMutex) Wlock() {
+	(*sync.RWMutex)(m).Lock()
+}
+
+func (m *inversedRWMutex) Wunlock() {
+	(*sync.RWMutex)(m).Unlock()
 }
 
 func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 	return func() {
+		m.mut = inversedRWMutex{}
+		m.cond.L = &m.mut
 		m.channels = channels
 		m.sampleRate = sampleRate
-		m.head = &frame{}
-		m.input = make(chan inputSignal, 1)
+		if m.InputBuffer == 0 {
+			m.InputBuffer = defaultInputBuffer
+		}
+		m.input = make(chan signal.Floating, m.InputBuffer)
 	}
 }
 
-func mustInitialized() {
-	panic("mixer sink must be bound before source")
-}
-
-// Source provides mixer source allocator. Mixer source outputs mixed
-// signal. Only single source per mixer is allowed. Must be called after
-// Sink, otherwise will panic.
-func (m *Mixer) Source() pipe.SourceAllocatorFunc {
-	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
-		m.once.Do(mustInitialized) // check that source is bound after sink.
-		m.pool = signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
-		return pipe.Source{
-			Output: pipe.SignalProperties{
-				Channels:   m.channels,
-				SampleRate: m.sampleRate,
-			},
-			StartFunc: func(ctx context.Context) error {
-				m.output = make(chan signal.Floating, 1)
-				go mixer(ctx, m.pool, m.frames, m.input, m.output)
-				// this is needed to enable garbage collection
-				m.frames = nil
-				m.head = nil
-				return nil
-			},
-			SourceFunc: func(out signal.Floating) (int, error) {
-				if sum, ok := <-m.output; ok {
-					defer sum.Free(m.pool)
-					return signal.FloatingAsFloating(sum, out), nil
-				}
-				return 0, io.EOF
-			},
-		}, nil
-	}
-}
-
-func mixer(ctx context.Context, pool *signal.PoolAllocator, frames []*frame, input <-chan inputSignal, output chan<- signal.Floating) {
-	defer close(output)
-	inputs := len(frames)
-	for inputs > 0 {
-		var is inputSignal
-		select {
-		case is = <-input:
-		case <-ctx.Done():
-			return
-		}
-		f := frames[is.input]
-
-		// flush the signal
-		if is.buffer == nil {
-			frames[is.input] = nil
-			inputs--
-			for current := f; current != nil; current = current.next {
-				current.flushed++
-				if current.sum() {
-					select {
-					case output <- current.buffer:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-			continue
-		}
-
-		if f.buffer == nil {
-			f.buffer = pool.GetFloat64()
-		}
-		f.add(is.buffer)
-		is.buffer.Free(pool)
-		if f.sum() {
-			select {
-			case output <- f.buffer:
-			case <-ctx.Done():
-				return
-			}
-		}
-		if f.next == nil {
-			// flushed sinks are not expected anymore
-			f.next = &frame{
-				expected: f.expected - f.flushed,
-			}
-		}
-		frames[is.input] = f.next
-	}
+func mustAfterSink() {
+	panic("mixer source bound before sink")
 }
 
 // Sink provides mixer sink allocator. Mixer sink receives a signal for
 // mixing. Multiple sinks per mixer is allowed.
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
-		m.once.Do(m.init(props.SampleRate, props.Channels))
+		m.initialize.Do(m.init(props.SampleRate, props.Channels))
 		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
 		}
 		if m.channels != props.Channels {
 			return pipe.Sink{}, ErrDifferentChannels
 		}
-		input := len(m.frames)
-		m.frames = append(m.frames, m.head)
-		m.head.expected++
+		m.mix.expected++
 		var startCtx context.Context
 		return pipe.Sink{
 			StartFunc: func(ctx context.Context) error {
@@ -156,22 +104,20 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 			},
 			SinkFunc: func(floats signal.Floating) error {
 				// sink new buffer
-				buf := m.pool.GetFloat64()
-				copied := signal.FloatingAsFloating(floats, buf)
-				if copied != buf.Length() {
-					buf = buf.Slice(0, copied)
-				}
+				m.mut.Lock()
 				select {
-				case m.input <- inputSignal{input: input, buffer: buf}:
+				case m.input <- floats:
+					m.cond.Wait()
+					m.mut.Unlock()
+					return nil
 				case <-startCtx.Done():
+					m.mut.Unlock()
 					return nil
 				}
-
-				return nil
 			},
 			FlushFunc: func(ctx context.Context) error {
 				select {
-				case m.input <- inputSignal{input: input}:
+				case m.input <- nil:
 				case <-ctx.Done():
 					return nil
 				}
@@ -181,30 +127,72 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 	}
 }
 
-func min(n1, n2 int) int {
-	if n1 < n2 {
-		return n1
+// Source provides mixer source allocator. Mixer source outputs mixed
+// signal. Only single source per mixer is allowed. Must be called after
+// Sink, otherwise will panic.
+func (m *Mixer) Source() pipe.SourceAllocatorFunc {
+	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
+		m.initialize.Do(mustAfterSink) // check that source is bound after sink.
+		pool := signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
+		m.mix.buffer = pool.GetFloat64()
+		var startCtx context.Context
+		return pipe.Source{
+			Output: pipe.SignalProperties{
+				Channels:   m.channels,
+				SampleRate: m.sampleRate,
+			},
+			StartFunc: func(ctx context.Context) error {
+				startCtx = ctx
+				return nil
+			},
+			SourceFunc: func(out signal.Floating) (int, error) {
+				if read, ok := m.source(startCtx, out); ok {
+					m.mut.Wlock()
+					m.mix.added = 0
+					m.mix.buffer = m.mix.buffer.Slice(0, 0)
+					m.cond.Broadcast()
+					m.mut.Wunlock()
+					return read, nil
+				}
+				return 0, io.EOF
+			},
+			FlushFunc: func(ctx context.Context) error {
+				m.mut.Wlock()
+				m.cond.Broadcast()
+				m.mut.Wunlock()
+				return nil
+			},
+		}, nil
 	}
-	return n2
 }
 
-// frame represents a slice of samples to mix.
-type frame struct {
-	next     *frame
-	buffer   signal.Floating
-	expected int
-	added    int
-	flushed  int
-	length   int // https://github.com/pipelined/mixer/issues/5
+func (m *Mixer) source(ctx context.Context, out signal.Floating) (int, bool) {
+	var in signal.Floating
+	for {
+		if m.mix.expected == 0 {
+			return 0, false
+		}
+		select {
+		case in = <-m.input:
+		case <-ctx.Done():
+			return 0, false
+		}
+
+		if in != nil {
+			m.mix.add(in)
+		} else {
+			m.mix.expected--
+		}
+		if m.mix.sum() {
+			return signal.FloatingAsFloating(m.mix.buffer, out), true
+		}
+	}
 }
 
 // sum returns mixed samplein.
 func (f *frame) sum() bool {
-	if f.added == 0 || f.added+f.flushed != f.expected {
+	if f.added != f.expected {
 		return false
-	}
-	if f.buffer.Length() != f.length {
-		f.buffer = f.buffer.Slice(0, f.length)
 	}
 	for i := 0; i < f.buffer.Len(); i++ {
 		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
@@ -214,12 +202,24 @@ func (f *frame) sum() bool {
 
 func (f *frame) add(in signal.Floating) {
 	f.added++
-	l := min(f.buffer.Len(), in.Len())
-	for i := 0; i < l; i++ {
+	if f.buffer.Len() == 0 {
+		for i := 0; i < in.Len(); i++ {
+			f.buffer.AppendSample(in.Sample(i))
+		}
+		return
+	}
+
+	if f.buffer.Len() >= in.Len() {
+		for i := 0; i < in.Len(); i++ {
+			f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
+		}
+		return
+	}
+
+	for i := 0; i < f.buffer.Len(); i++ {
 		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
 	}
-	if f.length < in.Length() {
-		f.length = in.Length()
+	for i := f.buffer.Len(); i < in.Len(); i++ {
+		f.buffer.AppendSample(in.Sample(i))
 	}
-	return
 }
