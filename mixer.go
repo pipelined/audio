@@ -29,6 +29,7 @@ type Mixer struct {
 	inputSignals chan signal.Floating
 	mix          frame
 	cond         sync.Cond
+	mut          inversedRWMutex
 }
 
 type (
@@ -38,11 +39,30 @@ type (
 		expected int
 		added    int
 	}
+
+	inversedRWMutex sync.RWMutex
 )
+
+func (m *inversedRWMutex) Lock() {
+	(*sync.RWMutex)(m).RLock()
+}
+
+func (m *inversedRWMutex) Unlock() {
+	(*sync.RWMutex)(m).RUnlock()
+}
+
+func (m *inversedRWMutex) Wlock() {
+	(*sync.RWMutex)(m).Lock()
+}
+
+func (m *inversedRWMutex) Wunlock() {
+	(*sync.RWMutex)(m).Unlock()
+}
 
 func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
 	return func() {
-		m.cond.L = &sync.Mutex{}
+		m.mut = inversedRWMutex{}
+		m.cond.L = &m.mut
 		m.channels = channels
 		m.sampleRate = sampleRate
 		m.inputSignals = make(chan signal.Floating, 1)
@@ -73,14 +93,14 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 			},
 			SinkFunc: func(floats signal.Floating) error {
 				// sink new buffer
-				m.cond.L.Lock()
+				m.mut.Lock()
 				select {
 				case m.inputSignals <- floats:
 					m.cond.Wait()
-					m.cond.L.Unlock()
+					m.mut.Unlock()
 					return nil
 				case <-startCtx.Done():
-					m.cond.L.Unlock()
+					m.mut.Unlock()
 					return nil
 				}
 			},
@@ -116,19 +136,19 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 			},
 			SourceFunc: func(out signal.Floating) (int, error) {
 				if read, ok := m.source(startCtx, out); ok {
-					m.cond.L.Lock()
+					m.mut.Wlock()
 					m.mix.added = 0
 					m.mix.buffer = m.mix.buffer.Slice(0, 0)
 					m.cond.Broadcast()
-					m.cond.L.Unlock()
+					m.mut.Wunlock()
 					return read, nil
 				}
 				return 0, io.EOF
 			},
 			FlushFunc: func(ctx context.Context) error {
-				m.cond.L.Lock()
+				m.mut.Wlock()
 				m.cond.Broadcast()
-				m.cond.L.Unlock()
+				m.mut.Wunlock()
 				return nil
 			},
 		}, nil
