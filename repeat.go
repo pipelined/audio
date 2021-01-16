@@ -18,7 +18,7 @@ type Repeater struct {
 	bufferSize int
 	sampleRate signal.Frequency
 	channels   int
-	sources    []chan message
+	sources    []chan *message
 }
 
 type message struct {
@@ -37,13 +37,14 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 			SinkFunc: func(in signal.Floating) error {
 				r.m.Lock()
 				defer r.m.Unlock()
+				out := p.GetFloat64()
+				signal.FloatingAsFloating(in, out)
+				messagePtr := &message{
+					sources: int32(len(r.sources)),
+					buffer:  out,
+				}
 				for _, source := range r.sources {
-					out := p.GetFloat64()
-					signal.FloatingAsFloating(in, out)
-					source <- message{
-						sources: int32(len(r.sources)),
-						buffer:  out,
-					}
+					source <- messagePtr
 				}
 				return nil
 			},
@@ -64,23 +65,23 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 func (r *Repeater) Source() pipe.SourceAllocatorFunc {
 	r.m.Lock()
 	defer r.m.Unlock()
-	source := make(chan message, 1)
+	source := make(chan *message, 1)
 	r.sources = append(r.sources, source)
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		p := signal.GetPoolAllocator(r.channels, bufferSize, bufferSize)
 		var (
-			message message
-			ok      bool
+			messagePtr *message
+			ok         bool
 		)
 		return pipe.Source{
 				SourceFunc: func(b signal.Floating) (int, error) {
-					message, ok = <-source
+					messagePtr, ok = <-source
 					if !ok {
 						return 0, io.EOF
 					}
-					read := signal.FloatingAsFloating(message.buffer, b)
-					if atomic.AddInt32(&message.sources, -1) == 0 {
-						message.buffer.Free(p)
+					read := signal.FloatingAsFloating(messagePtr.buffer, b)
+					if atomic.AddInt32(&messagePtr.sources, -1) == 0 {
+						messagePtr.buffer.Free(p)
 					}
 					return read, nil
 				},
