@@ -37,14 +37,13 @@ func (r *Repeater) Sink() pipe.SinkAllocatorFunc {
 			SinkFunc: func(in signal.Floating) error {
 				r.m.Lock()
 				defer r.m.Unlock()
-				out := p.GetFloat64()
+				out := p.Float64()
 				signal.FloatingAsFloating(in, out)
-				messagePtr := &message{
-					sources: int32(len(r.sources)),
-					buffer:  out,
-				}
 				for _, source := range r.sources {
-					source <- messagePtr
+					source <- &message{
+						sources: int32(len(r.sources)),
+						buffer:  out,
+					}
 				}
 				return nil
 			},
@@ -85,7 +84,7 @@ func (r *Repeater) Source() pipe.SourceAllocatorFunc {
 					}
 					return read, nil
 				},
-				Output: pipe.SignalProperties{
+				SignalProperties: pipe.SignalProperties{
 					SampleRate: r.sampleRate,
 					Channels:   r.channels,
 				},

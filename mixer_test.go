@@ -26,9 +26,9 @@ func TestMixer(t *testing.T) {
 			t.Helper()
 			mixer := audio.Mixer{}
 
-			routes := make([]pipe.Routing, 0, len(generators)+1)
+			routes := make([]pipe.Line, 0, len(generators)+1)
 			for _, gen := range generators {
-				routes = append(routes, pipe.Routing{
+				routes = append(routes, pipe.Line{
 					Source: (&mock.Source{
 						Channels: numChannels,
 						Limit:    gen.limit,
@@ -38,7 +38,7 @@ func TestMixer(t *testing.T) {
 				})
 			}
 			sink := mock.Sink{}
-			routes = append(routes, pipe.Routing{
+			routes = append(routes, pipe.Line{
 				Source: mixer.Source(),
 				Sink:   sink.Sink(),
 			})
@@ -46,7 +46,7 @@ func TestMixer(t *testing.T) {
 			p, err := pipe.New(bufferSize, routes...)
 			assertEqual(t, "error", err, nil)
 
-			err = p.Async(context.Background()).Await()
+			err = pipe.Wait(p.Start(context.Background()))
 			assertEqual(t, "error", err, nil)
 
 			result := make([]float64, sink.Values.Len())
@@ -116,13 +116,13 @@ func BenchmarkMixerLines(b *testing.B) {
 
 func run(numChannels, bufferSize, limit, numLines int) {
 	var (
-		lines []pipe.Routing
+		lines []pipe.Line
 		mixer audio.Mixer
 	)
 	valueMultiplier := 1.0 / float64(numLines)
 	for i := 0; i < numLines; i++ {
 		lines = append(lines,
-			pipe.Routing{
+			pipe.Line{
 				Source: (&mock.Source{
 					Channels: numChannels,
 					Limit:    limit,
@@ -132,7 +132,7 @@ func run(numChannels, bufferSize, limit, numLines int) {
 			},
 		)
 	}
-	lines = append(lines, pipe.Routing{
+	lines = append(lines, pipe.Line{
 		Source: mixer.Source(),
 		Sink: (&mock.Sink{
 			Discard: true,
@@ -140,5 +140,5 @@ func run(numChannels, bufferSize, limit, numLines int) {
 	})
 
 	p, _ := pipe.New(bufferSize, lines...)
-	p.Async(context.Background()).Await()
+	_ = pipe.Wait(p.Start(context.Background()))
 }
