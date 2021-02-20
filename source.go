@@ -13,7 +13,7 @@ func Source(sr signal.Frequency, s signal.Signal) pipe.SourceAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		return pipe.Source{
 			SourceFunc: signalSource(s),
-			Output: pipe.SignalProperties{
+			SignalProperties: pipe.SignalProperties{
 				Channels:   s.Channels(),
 				SampleRate: sr,
 			},

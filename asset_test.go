@@ -110,13 +110,13 @@ func TestAssetSink(t *testing.T) {
 	for _, test := range tests {
 		p, _ := pipe.New(
 			bufferSize,
-			pipe.Routing{
+			pipe.Line{
 				Source: test.source,
 				Sink:   test.asset.Sink(),
 			},
 		)
 
-		p.Async(context.Background()).Await()
+		_ = pipe.Wait(p.Start(context.Background()))
 
 		assertEqual(t, "channels", test.asset.Signal.Channels(), test.numChannels)
 		assertEqual(t, "sample rate", test.asset.SampleRate(), sampleRate)

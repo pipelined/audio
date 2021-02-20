@@ -134,10 +134,10 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		m.initialize.Do(mustAfterSink) // check that source is bound after sink.
 		pool := signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
-		m.mix.buffer = pool.GetFloat64()
+		m.mix.buffer = pool.Float64()
 		var startCtx context.Context
 		return pipe.Source{
-			Output: pipe.SignalProperties{
+			SignalProperties: pipe.SignalProperties{
 				Channels:   m.channels,
 				SampleRate: m.sampleRate,
 			},

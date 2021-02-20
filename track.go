@@ -44,7 +44,7 @@ func (t *Track) Source(sampleRate signal.Frequency, start, end int) pipe.SourceA
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		return pipe.Source{
 				SourceFunc: trackSource(t.head.nextAfter(start), start, end),
-				Output: pipe.SignalProperties{
+				SignalProperties: pipe.SignalProperties{
 					Channels:   t.channels,
 					SampleRate: sampleRate,
 				},

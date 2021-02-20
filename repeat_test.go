@@ -22,16 +22,16 @@ func TestPipe(t *testing.T) {
 	sink1 := &mock.Sink{Discard: true}
 	sink2 := &mock.Sink{Discard: true}
 	p, err := pipe.New(bufferSize,
-		pipe.Routing{
+		pipe.Line{
 			Source:     source.Source(),
 			Processors: pipe.Processors(proc1.Processor(), proc2.Processor()),
 			Sink:       repeater.Sink(),
 		},
-		pipe.Routing{
+		pipe.Line{
 			Source: repeater.Source(),
 			Sink:   sink1.Sink(),
 		},
-		pipe.Routing{
+		pipe.Line{
 			Source: repeater.Source(),
 			Sink:   sink2.Sink(),
 		},
@@ -39,7 +39,7 @@ func TestPipe(t *testing.T) {
 	assertNil(t, "error", err)
 
 	// start
-	err = p.Async(context.Background()).Await()
+	_ = pipe.Wait(p.Start(context.Background()))
 	assertNil(t, "error", err)
 
 	assertEqual(t, "messages", source.Counter.Messages, 862)
@@ -52,29 +52,27 @@ func TestRepeaterAddOutput(t *testing.T) {
 
 	p, _ := pipe.New(
 		bufferSize,
-		pipe.Routing{
+		pipe.Line{
 			Source: (&mock.Source{
 				Limit:    10 * bufferSize,
 				Channels: 2,
 			}).Source(),
 			Sink: repeater.Sink(),
 		},
-		pipe.Routing{
+		pipe.Line{
 			Source: repeater.Source(),
 			Sink:   sink1.Sink(),
 		},
 	)
-	r := p.Async(context.Background())
+	errc := p.Start(context.Background())
 
 	sink2 := &mock.Sink{}
-	l, err := p.AddLine(pipe.Routing{
+	p.Push(p.AddLine(pipe.Line{
 		Source: repeater.Source(),
 		Sink:   sink2.Sink(),
-	})
-	assertNil(t, "err", err)
-	<-r.StartLine(l)
+	}))
 	// start
-	_ = r.Await()
+	_ = pipe.Wait(errc)
 	assertEqual(t, "sink1 messages", sink1.Counter.Messages, 10)
 	assertEqual(t, "sink1 samples", sink1.Counter.Samples, 10*bufferSize)
 	assertEqual(t, "sink2 messages", sink2.Counter.Messages > 0, true)
@@ -91,21 +89,21 @@ func BenchmarkRepeat(b *testing.B) {
 	repeater := audio.Repeater{}
 	p, _ := pipe.New(
 		bufferSize,
-		pipe.Routing{
+		pipe.Line{
 			Source: source.Source(),
 			Sink:   repeater.Sink(),
 		},
-		pipe.Routing{
+		pipe.Line{
 			Source: repeater.Source(),
 			Sink:   (&mock.Sink{Discard: true}).Sink(),
 		},
-		pipe.Routing{
+		pipe.Line{
 			Source: repeater.Source(),
 			Sink:   (&mock.Sink{Discard: true}).Sink(),
 		},
 	)
 	for i := 0; i < b.N; i++ {
-		_ = p.Async(context.Background(), source.Reset()).Await()
+		_ = pipe.Wait(p.Start(context.Background(), source.Reset()))
 	}
 }
 
