@@ -9,6 +9,7 @@ import (
 
 	"pipelined.dev/pipe"
 	"pipelined.dev/pipe/mock"
+	"pipelined.dev/pipe/mutable"
 	"pipelined.dev/signal"
 )
 
@@ -52,7 +53,7 @@ func TestMixer(t *testing.T) {
 			result := make([]float64, sink.Values.Len())
 			signal.ReadFloat64(sink.Values, result)
 			assertEqual(t, "result", result, expected)
-			assertEqual(t, "messages", int(math.Ceil(float64(len(result))/float64(bufferSize)))+1, sink.Messages)
+			assertEqual(t, "messages", int(math.Ceil(float64(len(result))/float64(bufferSize))), sink.Messages)
 		}
 	}
 	t.Run("single channel",
@@ -99,22 +100,28 @@ func TestMixer(t *testing.T) {
 }
 
 func Test100Lines(t *testing.T) {
-	run(1, 512, 51200, 100)
+	run(1, 512, 51200, 100, mutable.Immutable())
 }
 
 func BenchmarkMixerLimit(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		run(1, 512, i*2, 10)
+		run(1, 512, i*2, 10, mutable.Immutable())
 	}
 }
 
 func BenchmarkMixerLines(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		run(1, 512, 51200, i+1)
+		run(1, 512, 51200, i+1, mutable.Immutable())
 	}
 }
 
-func run(numChannels, bufferSize, limit, numLines int) {
+func BenchmarkMixerLimitSync(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		run(1, 512, i*2, 10, mutable.Mutable())
+	}
+}
+
+func run(numChannels, bufferSize, limit, numLines int, mctx mutable.Context) {
 	var (
 		lines []pipe.Line
 		mixer audio.Mixer
@@ -123,6 +130,7 @@ func run(numChannels, bufferSize, limit, numLines int) {
 	for i := 0; i < numLines; i++ {
 		lines = append(lines,
 			pipe.Line{
+				Context: mctx,
 				Source: (&mock.Source{
 					Channels: numChannels,
 					Limit:    limit,

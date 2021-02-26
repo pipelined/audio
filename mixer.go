@@ -24,59 +24,66 @@ var (
 // time, it's just to prevent from blocking on select for too long.
 const defaultInputBuffer = 2
 
-// Mixer summs up multiple signals. It has multiple sinks and a single
-// source. Recommended size for input buffer is expected number of sinks
-// the mixer will have. Default value is two.
-type Mixer struct {
-	InputBuffer int
-	initialize  sync.Once
-	sampleRate  signal.Frequency
-	channels    int
-	input       chan signal.Floating
-	mut         inversedRWMutex
-	cond        sync.Cond
-	mix         frame
-}
-
 type (
-	// frame represents a slice of samples to mix.
-	frame struct {
-		buffer   signal.Floating
-		expected int
-		added    int
+	// Mixer summs up multiple signals. It has multiple sinks and a single
+	// source.
+	Mixer struct {
+		// InputBuffer int
+		initialize sync.Once
+		sampleRate signal.Frequency
+		channels   int
+		inputs     []*mixerInput
+		pool       *signal.PoolAllocator
+	}
+	// mixerOutput represents a slice of samples to mix.
+	mixerOutput struct {
+		buffer signal.Floating
+		len    int
 	}
 
-	// inversed RW mutex, i.e. defaul Lock/Unlock methods are read-level
-	// and new methods Wlock/Wunlock are write-level.
-	inversedRWMutex sync.RWMutex
+	mixerInput struct {
+		write  chan struct{}
+		read   chan struct{}
+		buffer signal.Floating
+	}
+
+	chanMutex chan struct{}
 )
 
-func (m *inversedRWMutex) Lock() {
-	(*sync.RWMutex)(m).RLock()
+func newMixerInput(buf signal.Floating) mixerInput {
+	write := make(chan struct{}, 1)
+	write <- struct{}{}
+	read := make(chan struct{}, 1)
+	return mixerInput{
+		write:  write,
+		read:   read,
+		buffer: buf,
+	}
 }
 
-func (m *inversedRWMutex) Unlock() {
-	(*sync.RWMutex)(m).RUnlock()
+func wait(ctx context.Context, m chanMutex) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case _, ok := <-m:
+		return ok
+	}
 }
 
-func (m *inversedRWMutex) Wlock() {
-	(*sync.RWMutex)(m).Lock()
+func notify(ctx context.Context, m chanMutex) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case m <- struct{}{}:
+		return true
+	}
 }
 
-func (m *inversedRWMutex) Wunlock() {
-	(*sync.RWMutex)(m).Unlock()
-}
-
-func (m *Mixer) init(sampleRate signal.Frequency, channels int) func() {
+func (m *Mixer) init(sampleRate signal.Frequency, channels, bufferSize int) func() {
 	return func() {
-		m.mut = inversedRWMutex{}
-		m.cond.L = &m.mut
 		m.channels = channels
 		m.sampleRate = sampleRate
-		if m.InputBuffer == 0 {
-			m.InputBuffer = defaultInputBuffer
-		}
-		m.input = make(chan signal.Floating, m.InputBuffer)
+		m.pool = signal.GetPoolAllocator(channels, bufferSize, bufferSize)
 	}
 }
 
@@ -88,39 +95,34 @@ func mustAfterSink() {
 // mixing. Multiple sinks per mixer is allowed.
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
-		m.initialize.Do(m.init(props.SampleRate, props.Channels))
+		m.initialize.Do(m.init(props.SampleRate, props.Channels, bufferSize))
 		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
 		}
 		if m.channels != props.Channels {
 			return pipe.Sink{}, ErrDifferentChannels
 		}
-		m.mix.expected++
-		var startCtx context.Context
+		input := newMixerInput(m.pool.Float64())
+		m.inputs = append(m.inputs, &input)
+		var sinkCtx context.Context
 		return pipe.Sink{
 			StartFunc: func(ctx context.Context) error {
-				startCtx = ctx
+				sinkCtx = ctx
 				return nil
 			},
 			SinkFunc: func(floats signal.Floating) error {
-				// sink new buffer
-				m.mut.Lock()
-				select {
-				case m.input <- floats:
-					m.cond.Wait()
-					m.mut.Unlock()
-					return nil
-				case <-startCtx.Done():
-					m.mut.Unlock()
+				if ok := wait(sinkCtx, input.write); !ok {
 					return nil
 				}
+				n := signal.FloatingAsFloating(floats, input.buffer)
+				if n != bufferSize {
+					input.buffer = input.buffer.Slice(0, n)
+				}
+				notify(sinkCtx, input.read)
+				return nil
 			},
 			FlushFunc: func(ctx context.Context) error {
-				select {
-				case m.input <- nil:
-				case <-ctx.Done():
-					return nil
-				}
+				close(input.read)
 				return nil
 			},
 		}, nil
@@ -133,93 +135,58 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int) (pipe.Source, error) {
 		m.initialize.Do(mustAfterSink) // check that source is bound after sink.
-		pool := signal.GetPoolAllocator(m.channels, bufferSize, bufferSize)
-		m.mix.buffer = pool.Float64()
-		var startCtx context.Context
+		output := &mixerOutput{buffer: m.pool.Float64()}
+		var sourceCtx context.Context
 		return pipe.Source{
 			SignalProperties: pipe.SignalProperties{
 				Channels:   m.channels,
 				SampleRate: m.sampleRate,
 			},
 			StartFunc: func(ctx context.Context) error {
-				startCtx = ctx
+				sourceCtx = ctx
 				return nil
 			},
 			SourceFunc: func(out signal.Floating) (int, error) {
-				if read, ok := m.source(startCtx, out); ok {
-					m.mut.Wlock()
-					m.mix.added = 0
-					m.mix.buffer = m.mix.buffer.Slice(0, 0)
-					m.cond.Broadcast()
-					m.mut.Wunlock()
-					return read, nil
+				for i := 0; i < len(m.inputs); {
+					if ok := wait(sourceCtx, m.inputs[i].read); !ok {
+						m.inputs[i].buffer.Free(m.pool)
+						m.inputs = append(m.inputs[:i], m.inputs[i+1:]...)
+						continue
+					}
+					output.add(m.inputs[i].buffer)
+					notify(sourceCtx, m.inputs[i].write)
+					i++
 				}
-				return 0, io.EOF
+				if len(m.inputs) == 0 {
+					return 0, io.EOF
+				}
+				return output.sum(len(m.inputs), out), nil
 			},
 			FlushFunc: func(ctx context.Context) error {
-				m.mut.Wlock()
-				m.cond.Broadcast()
-				m.mut.Wunlock()
+				output.buffer.Free(m.pool)
 				return nil
 			},
 		}, nil
 	}
 }
 
-func (m *Mixer) source(ctx context.Context, out signal.Floating) (int, bool) {
-	var in signal.Floating
-	for {
-		if m.mix.expected == 0 {
-			return 0, false
-		}
-		select {
-		case in = <-m.input:
-		case <-ctx.Done():
-			return 0, false
-		}
-
-		if in != nil {
-			m.mix.add(in)
-		} else {
-			m.mix.expected--
-		}
-		if m.mix.sum() {
-			return signal.FloatingAsFloating(m.mix.buffer, out), true
-		}
-	}
-}
-
 // sum returns mixed samplein.
-func (f *frame) sum() bool {
-	if f.added != f.expected {
-		return false
-	}
+func (f *mixerOutput) sum(inputs int, out signal.Floating) (summed int) {
 	for i := 0; i < f.buffer.Len(); i++ {
-		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
+		out.SetSample(i, f.buffer.Sample(i)/float64(inputs))
+		f.buffer.SetSample(i, 0)
 	}
-	return true
+	summed, f.len = f.len, 0
+	return
 }
 
-func (f *frame) add(in signal.Floating) {
-	f.added++
-	if f.buffer.Len() == 0 {
-		for i := 0; i < in.Len(); i++ {
-			f.buffer.AppendSample(in.Sample(i))
-		}
-		return
+func (f *mixerOutput) add(in signal.Floating) {
+	if f.len < in.Len() {
+		f.len = in.Len()
 	}
 
-	if f.buffer.Len() >= in.Len() {
-		for i := 0; i < in.Len(); i++ {
-			f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
-		}
-		return
-	}
-
-	for i := 0; i < f.buffer.Len(); i++ {
+	for i := 0; i < in.Len(); i++ {
 		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
 	}
-	for i := f.buffer.Len(); i < in.Len(); i++ {
-		f.buffer.AppendSample(in.Sample(i))
-	}
+	return
 }
