@@ -38,7 +38,7 @@ type (
 	// mixerOutput represents a slice of samples to mix.
 	mixerOutput struct {
 		buffer signal.Floating
-		added  int
+		len    int
 	}
 
 	mixerInput struct {
@@ -160,11 +160,7 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 				if len(m.inputs) == 0 {
 					return 0, io.EOF
 				}
-				output.sum()
-				n := signal.FloatingAsFloating(output.buffer, out)
-				output.buffer = output.buffer.Slice(0, 0)
-				output.added = 0
-				return n, nil
+				return output.sum(len(m.inputs), out), nil
 			},
 			FlushFunc: func(ctx context.Context) error {
 				output.buffer.Free(m.pool)
@@ -175,32 +171,22 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 }
 
 // sum returns mixed samplein.
-func (f *mixerOutput) sum() {
+func (f *mixerOutput) sum(inputs int, out signal.Floating) (summed int) {
 	for i := 0; i < f.buffer.Len(); i++ {
-		f.buffer.SetSample(i, f.buffer.Sample(i)/float64(f.added))
+		out.SetSample(i, f.buffer.Sample(i)/float64(inputs))
+		f.buffer.SetSample(i, 0)
 	}
+	summed, f.len = f.len, 0
+	return
 }
 
 func (f *mixerOutput) add(in signal.Floating) {
-	f.added++
-	if f.buffer.Len() == 0 {
-		for i := 0; i < in.Len(); i++ {
-			f.buffer.AppendSample(in.Sample(i))
-		}
-		return
+	if f.len < in.Len() {
+		f.len = in.Len()
 	}
 
-	if f.buffer.Len() >= in.Len() {
-		for i := 0; i < in.Len(); i++ {
-			f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
-		}
-		return
-	}
-
-	for i := 0; i < f.buffer.Len(); i++ {
+	for i := 0; i < in.Len(); i++ {
 		f.buffer.SetSample(i, f.buffer.Sample(i)+in.Sample(i))
 	}
-	for i := f.buffer.Len(); i < in.Len(); i++ {
-		f.buffer.AppendSample(in.Sample(i))
-	}
+	return
 }
