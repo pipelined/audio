@@ -32,9 +32,12 @@ type (
 		initialize sync.Once
 		sampleRate signal.Frequency
 		channels   int
-		inputs     []*mixerInput
 		pool       *signal.PoolAllocator
+		// protect inputs, so adding new input won't cause data race
+		lock   sync.Mutex
+		inputs []*mixerInput
 	}
+
 	// mixerOutput represents a slice of samples to mix.
 	mixerOutput struct {
 		buffer signal.Floating
@@ -42,8 +45,8 @@ type (
 	}
 
 	mixerInput struct {
-		write  chan struct{}
-		read   chan struct{}
+		write  chanMutex
+		read   chanMutex
 		buffer signal.Floating
 	}
 
@@ -61,7 +64,7 @@ func newMixerInput(buf signal.Floating) mixerInput {
 	}
 }
 
-func wait(ctx context.Context, m chanMutex) bool {
+func (m chanMutex) wait(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
 		return false
@@ -70,7 +73,7 @@ func wait(ctx context.Context, m chanMutex) bool {
 	}
 }
 
-func notify(ctx context.Context, m chanMutex) bool {
+func (m chanMutex) notify(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
 		return false
@@ -96,6 +99,8 @@ func mustAfterSink() {
 func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 	return func(mut mutable.Context, bufferSize int, props pipe.SignalProperties) (pipe.Sink, error) {
 		m.initialize.Do(m.init(props.SampleRate, props.Channels, bufferSize))
+		m.lock.Lock()
+		defer m.lock.Unlock()
 		if m.sampleRate != props.SampleRate {
 			return pipe.Sink{}, ErrDifferentSampleRates
 		}
@@ -111,14 +116,14 @@ func (m *Mixer) Sink() pipe.SinkAllocatorFunc {
 				return nil
 			},
 			SinkFunc: func(floats signal.Floating) error {
-				if ok := wait(sinkCtx, input.write); !ok {
+				if ok := input.write.wait(sinkCtx); !ok {
 					return nil
 				}
 				n := signal.FloatingAsFloating(floats, input.buffer)
 				if n != bufferSize {
 					input.buffer = input.buffer.Slice(0, n)
 				}
-				notify(sinkCtx, input.read)
+				input.read.notify(sinkCtx)
 				return nil
 			},
 			FlushFunc: func(ctx context.Context) error {
@@ -147,20 +152,22 @@ func (m *Mixer) Source() pipe.SourceAllocatorFunc {
 				return nil
 			},
 			SourceFunc: func(out signal.Floating) (int, error) {
+				m.lock.Lock()
+				defer m.lock.Unlock()
 				for i := 0; i < len(m.inputs); {
-					if ok := wait(sourceCtx, m.inputs[i].read); !ok {
+					if ok := m.inputs[i].read.wait(sourceCtx); !ok {
 						m.inputs[i].buffer.Free(m.pool)
 						m.inputs = append(m.inputs[:i], m.inputs[i+1:]...)
 						continue
 					}
 					output.add(m.inputs[i].buffer)
-					notify(sourceCtx, m.inputs[i].write)
+					m.inputs[i].write.notify(sourceCtx)
 					i++
 				}
 				if len(m.inputs) == 0 {
 					return 0, io.EOF
 				}
-				return output.sum(len(m.inputs), out), nil
+				return output.sum(len(m.inputs), out) / m.channels, nil
 			},
 			FlushFunc: func(ctx context.Context) error {
 				output.buffer.Free(m.pool)
