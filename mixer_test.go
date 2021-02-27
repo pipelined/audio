@@ -99,6 +99,39 @@ func TestMixer(t *testing.T) {
 	)
 }
 
+func TestMixerAddInput(t *testing.T) {
+	mixer := &audio.Mixer{}
+	sink := &mock.Sink{}
+
+	p, _ := pipe.New(
+		bufferSize,
+		pipe.Line{
+			Source: (&mock.Source{
+				Limit:    10 * bufferSize,
+				Channels: 2,
+			}).Source(),
+			Sink: mixer.Sink(),
+		},
+		pipe.Line{
+			Source: mixer.Source(),
+			Sink:   sink.Sink(),
+		},
+	)
+	errc := p.Start(context.Background())
+
+	p.Push(p.AddLine(pipe.Line{
+		Source: (&mock.Source{
+			Limit:    10 * bufferSize,
+			Channels: 2,
+		}).Source(),
+		Sink: mixer.Sink(),
+	}))
+	// start
+	_ = pipe.Wait(errc)
+	assertEqual(t, "sink1 messages", sink.Counter.Messages >= 10, true)
+	assertEqual(t, "sink1 samples", sink.Counter.Samples >= 10*bufferSize, true)
+}
+
 func Test100Lines(t *testing.T) {
 	run(1, 512, 51200, 100, mutable.Immutable())
 }
